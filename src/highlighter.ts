@@ -8,7 +8,7 @@ export class Highlighter {
     }
 
     protected col(s: string, t: number[], b = false) {
-        return `\x1b[${b?'48':'38'};2;${t[0]};${t[1]};${t[2]}m${s}\x1b[38;2;${this.theme.white[0]};${this.theme.white[1]};${this.theme.white[2]}m`;
+        return `\x1b[${b?'48':'38'};2;${t[0]};${t[1]};${t[2]}m${s}`;
     }
     
     parseLine(_l: string): string {
