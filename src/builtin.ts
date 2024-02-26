@@ -1,17 +1,9 @@
 import { Highlighter } from "./highlighter.ts";
-
-export type Theme = {
-    black: number[], white: number[], lred: number[], dred: number[],
-    green: number[], lyellow: number[], dyellow: number[], blue: number[],
-    magenta: number[], cyan: number[], gray1: number[], gray2: number[]
-}
+import { ThemeManager } from "./index.ts";
 
 export class HighlighterNone extends Highlighter {
-    constructor() {
-        super({ black: [40, 44, 52], white: [171, 178, 191], lred: [224, 108, 117], dred: [190, 80, 70],
-                green: [152, 195, 121], lyellow: [229, 192, 123], dyellow: [209, 154, 102], blue: [97, 175, 239],
-                magenta: [198, 120, 221], cyan: [86, 182, 194], gray1: [76, 82, 89], gray2: [92, 99, 112]
-        });
+    constructor(tm: ThemeManager) {
+        super(tm);
     }
 
     parseLine(l: string): string {
@@ -20,8 +12,8 @@ export class HighlighterNone extends Highlighter {
 }
 
 export class HighlighterTS extends Highlighter {
-    constructor(theme: Theme) {
-        super(theme);
+    constructor(tm: ThemeManager) {
+        super(tm);
     }
 
     parseLine(l: string): string {
@@ -78,7 +70,7 @@ export class HighlighterTS extends Highlighter {
         //         case 'COLON':
         //         case 'SEMICOLON':
         //         case 'EQUALS':
-        //             m += this.col(toks[i].value, this.theme.white);
+        //             m += this.col(toks[i].value, this.tm.get('foreground'));
         //         break;
 
         //         case 'WHITESPACE':
@@ -92,8 +84,8 @@ export class HighlighterTS extends Highlighter {
 }
 
 export class HighlighterSV extends Highlighter {
-    constructor(theme: Theme) {
-        super(theme);
+    constructor(tm: ThemeManager) {
+        super(tm);
     }
 
     getToken(s: string) {
@@ -109,27 +101,27 @@ export class HighlighterSV extends Highlighter {
 
         // Note: the priority of this matters
         if(sec.match(/^[rR][0-7]$/)) {
-            return this.col(sec, this.theme.magenta) + this.col((s.endsWith(',')) ? ',' : '', this.theme.white);
+            return this.col(sec, this.tm.get('keyword')) + this.col((s.endsWith(',')) ? ',' : '', this.tm.get('foreground'));
         } else if(!isNaN(parseInt(sec))) {
-            return this.col(sec, this.theme.lyellow) + this.col((s.endsWith(',')) ? ',' : '', this.theme.white);
+            return this.col(sec, this.tm.get('number')) + this.col((s.endsWith(',')) ? ',' : '', this.tm.get('foreground'));
         } else if(sec.match(/^\[[rR][0-7]\]$/)) {
-            return this.col('[', this.theme.cyan) + this.col(sec.substring(1,sec.length-1), this.theme.magenta) + this.col(']', this.theme.cyan) + this.col((s.endsWith(',')) ? ',' : '', this.theme.white);
+            return this.col('[', this.tm.get('symbol')) + this.col(sec.substring(1,sec.length-1), this.tm.get('keyword')) + this.col(']', this.tm.get('symbol')) + this.col((s.endsWith(',')) ? ',' : '', this.tm.get('foreground'));
         } else if(sec.match(/^\[([A-Za-z_])+([A-Za-z_0-9])*\]$/)) {
-            return this.col(sec, this.theme.blue) + this.col((s.endsWith(',')) ? ',' : '', this.theme.white);
+            return this.col(sec, this.tm.get('symbol')) + this.col((s.endsWith(',')) ? ',' : '', this.tm.get('foreground'));
         } else if(sec.match(/^\[([0-9])+\]$/) || sec.match(/^\[0[Xx]([0-9A-Fa-f]){1,4}\]$/)) {
-            return this.col(sec, this.theme.cyan) + this.col((s.endsWith(',')) ? ',' : '', this.theme.white);
+            return this.col(sec, this.tm.get('symbol')) + this.col((s.endsWith(',')) ? ',' : '', this.tm.get('foreground'));
         } else if(sec.match(/^".*"$/)) {
-            return this.col(sec, this.theme.green) + this.col((s.endsWith(',')) ? ',' : '', this.theme.white);
+            return this.col(sec, this.tm.get('string')) + this.col((s.endsWith(',')) ? ',' : '', this.tm.get('foreground'));
         } else if(sec.match(/^.(asciiz|ascii|byte|short|include|define|org|global)$/)) {
-            return this.col(sec, this.theme.magenta) + this.col((s.endsWith(',')) ? ',' : '', this.theme.white);
+            return this.col(sec, this.tm.get('keyword')) + this.col((s.endsWith(',')) ? ',' : '', this.tm.get('foreground'));
         } else if(sec.match(/^([A-Za-z_])\w+:$/)) {
-            return this.col(sec, this.theme.blue) + this.col((s.endsWith(',')) ? ',' : '', this.theme.white);
+            return this.col(sec, this.tm.get('decl_function')) + this.col((s.endsWith(',')) ? ',' : '', this.tm.get('foreground'));
         } else if(sec.toLowerCase().match(instructionRegex)) {
-            return this.col(sec, this.theme.lred) + this.col((s.endsWith(',')) ? ',' : '', this.theme.white);
+            return this.col(sec, this.tm.get('function')) + this.col((s.endsWith(',')) ? ',' : '', this.tm.get('foreground'));
         } else if(sec.match(/^([A-Za-z_]+)\w$/)) {
-            return this.col(sec, this.theme.white) + this.col((s.endsWith(',')) ? ',' : '', this.theme.white);
+            return this.col(sec, this.tm.get('foreground')) + this.col((s.endsWith(',')) ? ',' : '', this.tm.get('foreground'));
         } else {
-            return this.col(sec, this.theme.white) + this.col((s.endsWith(',')) ? ',' : '', this.theme.white);
+            return this.col(sec, this.tm.get('foreground')) + this.col((s.endsWith(',')) ? ',' : '', this.tm.get('foreground'));
         }
     }
 

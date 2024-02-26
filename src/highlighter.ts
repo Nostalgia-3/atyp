@@ -1,15 +1,10 @@
-/** Base class for all syntax highlighting */
-export type Theme = {
-    black: number[], white: number[], lred: number[], dred: number[],
-    green: number[], lyellow: number[], dyellow: number[], blue: number[],
-    magenta: number[], cyan: number[], gray1: number[], gray2: number[]
-}
+import { ThemeManager } from "./index.ts";
 
 export class Highlighter {
-    protected theme: Theme;
+    protected tm: ThemeManager;
 
-    constructor(theme: Theme) {
-        this.theme = theme;
+    constructor(tm: ThemeManager) {
+        this.tm = tm;
     }
 
     protected col(s: string, t: number[], b = false) {

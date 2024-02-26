@@ -17,7 +17,7 @@ function ansiRegex({onlyFirst = false} = {}) {
     return new RegExp(pattern, onlyFirst ? undefined : 'g');
 }
 
-type Theme = {
+export type Theme = {
     metadata: {
         name: string,
         id: string,
@@ -40,7 +40,7 @@ export enum Mode {
 
 const home = dir('home');
 
-class ThemeManager {
+export class ThemeManager {
     editor: Editor;
     themes: Map<string, Theme>;
     activeTheme: string;
@@ -516,26 +516,18 @@ export class Editor {
         // Make tab string
         let tabs = ``;
 
-        const bufs = this.buffers;
-        let len = 2;
-
-        for(let i=0;i<bufs.length;i++) {
-            if(bufs[i].file == null) continue;
-            len = (((bufs[i].file?.length as number) > len) ? (bufs[i].file?.length as number) : len);
-        }
-
         for(let i=0;i<this.buffers.length;i++) {
             const fi = this.buffers[i].file;
 
             if(fi == null) {
-                tabs += `${this.makeTabString('---', i, len)}${this.col(this.tm.get('info_bar_back'))}`;
+                tabs += `${this.makeTabString('---', i)}${this.col(this.tm.get('info_bar_back'))}`;
             } else {
-                tabs += `${this.makeTabString(fi as string, i, len)}${this.col(this.tm.get('info_bar_back'))}`;
+                tabs += `${this.makeTabString(fi as string, i)}${this.col(this.tm.get('info_bar_back'))}`;
             }
         }
 
         await this.clear(this.tm.get('background'));
-        await this.drawBuffer(new HighlighterNone());
+        await this.drawBuffer(new HighlighterNone(this.tm));
         await this.drawInfoBar(`${curBuf.canWrite ? '':'(RO) '}${mode} ${this.col(this.tm.get('info_bar_front'),true)}${this.debugMessage} ${tabs}`, `${cursorPos} ${amount}`, this.tm.get('info_bar_back'));
         await this.drawCommandBar(this.command.getBuf());
         if(this.renderMenu) await this.drawMenu();
@@ -707,9 +699,9 @@ export class Editor {
         this.renderMenu = true;
     }
 
-    makeTabString(fn: string, i: number, len: number) {
+    makeTabString(fn: string, i: number) {
         const back = (i == this.acBuf) ? 'tab_back_selected' : 'tab_back';
-        return `${this.col(this.tm.get(back))} ${i+1}. ${fn}${this.makeWhitespace(len-fn.length)} ${this.col(this.tm.get('info_bar_back'))}`;
+        return `${this.col(this.tm.get(back))} (${i}) ${fn}${this.makeWhitespace(10-fn.length)} ${this.col(this.tm.get('info_bar_back'))}`;
     }
 }
 
