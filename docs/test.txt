@@ -1,0 +1,29 @@
+Realistically, I could probably use this as a frame for basically all command-line
+tools. The main reason I'm thinking of that is just because it works surprisingly
+well for it being so badly programming (and like 90% of the code was written while
+I'm very tired).
+
+There are some pretty obvious things I need to do:
+    - Implement more keys (such as INS, DEL, and END)
+    - Cleanup the code to decrease repeated code
+    - Make rendering not redraw everything every keystroke like it does now
+    - Make more commands to allow for programming reasonably well
+    - Fix bugs that are currently in the program
+    - Add mouse support (e.g. clicking on a character should move the cursor to that
+    character)
+    - Make more stuff customizable (using the config system)
+    - Watch open files (and buffers) for changes, and ask user accordingly
+    - Make a system for having multiple open buffers (like with vim)
+        - This includes a "terminal" buffer, which connects to something like
+        powershell or shell (or something completely different)
+    - Implement selecting text
+        - This includes selecting with mouse support (though true atyp users don't
+        use the mouse ;>)
+
+And here are some goals that I want to achieve:
+    - Make the editor good enough to program in itself
+        - Do things listed above
+    - Make a "DOC" mode, where you can make docs that can be interacted with
+    - Make something cool in the editor
+    - Put stuff on the internet through something like GitHub
+    - Make a ton of stuff modular, including a plugin system
