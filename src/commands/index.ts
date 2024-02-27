@@ -181,7 +181,7 @@ export class CommandManager {
             editor.buffers.push(new TextBuffer(editor, undefined, false));
             editor.acBuf = editor.buffers.length-1;
 
-            editor.buffers[editor.acBuf].writeBuf(`This is a help menu!`);
+            editor.buffers[editor.acBuf].writeBuf(`This is a help menu! It is also not yet implemented, so oops :P`);
         });
 
         this.register('lt', { name: 'lt', description: 'Loads a theme from a JSON file', usage: 't <file: string>' }, async function(args: string[], editor: Editor) {
@@ -204,6 +204,11 @@ export class CommandManager {
 
         this.register('tr', { name: 'tr', description: 'Moves the tab pointer right', usage: 'tr [amount:  number]' }, async function(_args: string[], editor: Editor) {
             if(editor.acBuf < editor.buffers.length-1) editor.acBuf++;
+        });
+
+        this.register('oc', { name: 'oc', description: 'Opens a copy of the console buffer', usage: 'oc' }, async function(_args: string[], editor: Editor) {
+            editor.buffers.push(editor.console);
+            editor.acBuf = editor.buffers.length-1;
         });
     }
 

@@ -35,7 +35,8 @@ export enum Mode {
     COMMAND='C',
     INSERT='I',
     POPUP='P',
-    SELECT='S'
+    SELECT='S',
+    DOCS='D'
 }
 
 export class TextBuffer {
@@ -165,6 +166,7 @@ export class Editor {
     popupVisible = false;   // Whether or not the popup is visible
     renderMenu = false;     // Whether or not the menu should be rendered
     
+    console: TextBuffer;    // Buffer for logging
     buffers: TextBuffer[];  // List of buffers
     acBuf: number;          // Pointer to active buffer in buffers
 
@@ -181,11 +183,28 @@ export class Editor {
         this.loadThemes();
 
         this.command = new TextBuffer(this);
+        this.console = new TextBuffer(this);
 
         this.buffers.push(new TextBuffer(this));
         this.acBuf = 0;
 
         this.cm.init();
+    }
+
+    // Handle pressing return in doc
+    docReturn() {
+        const curBuf = this.buffers[this.acBuf];
+
+        // Get all of the "links," AKA {link}
+
+        this.findLinkLocations(curBuf.getBuf());
+    }
+
+    findLinkLocations(file: string) {
+        const sections = file.split('\n');
+        for(let i=0;i<sections.length;i++) {
+            this.console.setBuf(this.console.getBuf() + `${i} | ${sections[i]}: ${sections[i].search(/{.+}/)}\n`);
+        }
     }
 
     select() {
@@ -651,12 +670,14 @@ for await (const keypress of readKeypress()) {
         switch(keypress.key) {
             case 'i':
                 editor.mode = Mode.INSERT;
-                await editor.render();
+            break;
+
+            case 'd':
+                editor.mode = Mode.DOCS;
             break;
 
             case 's':
                 editor.select();
-                await editor.render();
             break;
 
             case ':':
@@ -734,16 +755,12 @@ for await (const keypress of readKeypress()) {
                 await editor.runCommand(editor.command.getBuf());
                 editor.command.setBuf('');
                 editor.command.cursor.x=0;
-
-                await editor.render();
             break;
 
             case 'escape':
                 editor.command.setBuf('');
                 editor.command.cursor.x=0;
                 editor.mode = Mode.NORMAL;
-
-                await editor.render();
             break;
 
             case 'space': await editor.writeToBuf(' ', true); break;
@@ -754,7 +771,6 @@ for await (const keypress of readKeypress()) {
 
         if(keypress.key == ':') {
             editor.mode = Mode.COMMAND;
-            await editor.render();
         }
     } else if(editor.mode == Mode.SELECT) {
         switch(keypress.key) {
@@ -763,7 +779,25 @@ for await (const keypress of readKeypress()) {
 
             case 'escape':
                 editor.mode = Mode.NORMAL;
-                await editor.render();
+            break;
+
+            default:
+                editor.bell();
+            break;
+        }
+    } else if(editor.mode == Mode.DOCS) {
+        switch(keypress.key) {
+            case 'left':    await activeBuf.left();     break;
+            case 'right':   await activeBuf.right();    break;
+            case 'up':      await activeBuf.up();       break;
+            case 'down':    await activeBuf.down();     break;
+
+            case 'return':
+                editor.docReturn();
+            break;
+
+            case 'escape':
+                editor.mode = Mode.NORMAL;
             break;
 
             default:
@@ -771,4 +805,6 @@ for await (const keypress of readKeypress()) {
             break;
         }
     }
+
+    await editor.render();
 }

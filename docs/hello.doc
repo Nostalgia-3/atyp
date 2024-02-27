@@ -1,0 +1,7 @@
+Hello world
+
+{docs/page2.doc}
+
+Text {docs/page2.doc}
+
+Multiple {docs/page2.doc} {docs/page2.doc}
