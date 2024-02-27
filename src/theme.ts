@@ -1,5 +1,91 @@
 // This is a copy of the theme so we can use
 // $HOME/atyp/themes/default.json
+
+import { Editor } from "./index.ts";
+
+export type Theme = {
+    metadata: {
+        name: string,
+        id: string,
+        author: string,
+        notes?: string
+    },
+
+    elements: Record<string, string>,
+
+    colors: {name: string, rgb: number[]}[]
+};
+
+export class ThemeManager {
+    editor: Editor;
+    themes: Map<string, Theme>;
+    activeTheme: string;
+
+    constructor(ed: Editor) {
+        this.editor = ed;
+        this.themes = new Map<string, Theme>();
+
+        this.activeTheme = 'default';
+    }
+
+    async setTheme(id: string) {
+        const theme = this.themes.get(id);
+
+        if(theme == undefined) {
+            await this.editor.spawnError(`Unknown theme id: ${id}`);
+            return;
+        }
+
+        this.activeTheme = id;
+
+        await this.editor.render();
+    }
+
+    get(name: 'foreground' | 'background' | 'selected_line' | 'info_bar_back' | 'info_bar_front' | 'tilda_empty' | 'tab_count' | 'mode_color' | 'line_num' | 'menu_bar_front' | 'menu_bar_selected' | 'menu_bar_back' | 'menu_bar_object' | 'menu_bar_func' | 'unknown' | string): number[] {
+        const theme = this.themes.get(this.activeTheme);
+
+        if(theme == undefined) { return [255, 255, 255]; }
+
+        const c = theme.elements[name];
+
+        // Handle this cooler
+        if(!c) { return [255, 255, 255]; }
+
+        return this.getColor(c);
+    }
+
+    getTheme(name: string) {
+        if(this.themes.get(name)) return true;
+        return false;
+    }
+
+    getColor(name: string): number[] {
+        const theme = this.themes.get(this.activeTheme);
+
+        if(theme == undefined) { return [255, 255, 255]; }
+
+        for(let i=0;i<theme.colors.length;i++) {
+            if(theme.colors[i].name == name) {
+                return theme.colors[i].rgb;
+            }
+        }
+
+        return [255, 255, 255];
+    }
+
+    async load(b: string) {
+        try {
+            JSON.parse(b);
+        } catch {
+            await this.editor.spawnError(`Unable to load ${b}!`);
+        }
+
+        const t = JSON.parse(b) as Theme;
+
+        this.themes.set(t.metadata.id, t);
+    }
+}
+
 export const DEFAULT_THEME = {
     "metadata": {
         "name": "Default",

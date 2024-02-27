@@ -1,5 +1,5 @@
 import { Highlighter } from "./highlighter.ts";
-import { ThemeManager } from "./index.ts";
+import { ThemeManager } from "./theme.ts";
 
 export class HighlighterNone extends Highlighter {
     constructor(tm: ThemeManager) {

@@ -1,4 +1,4 @@
-import { ThemeManager } from "./index.ts";
+import { ThemeManager } from "./theme.ts";
 
 export class Highlighter {
     protected tm: ThemeManager;
