@@ -1,4 +1,4 @@
-import { goTo, save, restore, showCursor } from "https://denopkg.com/iamnathanj/cursor@v2.2.0/mod.ts";
+import { goTo, showCursor, hideCursor } from "https://denopkg.com/iamnathanj/cursor@v2.2.0/mod.ts";
 import { writeAllSync } from "https://deno.land/std@0.216.0/io/write_all.ts";
 import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 import { existsSync } from "https://deno.land/std@0.216.0/fs/mod.ts";
@@ -75,23 +75,26 @@ export class TextBuffer {
         return s.length+l.length; // +l.length for counting newlines
     }
 
-    async left() {
+    left() {
         const lines = this.buffer.split('\n');
         if((this.cursor.x)>0) { this.cursor.x--; this.cursor.c--; }
         else if(lines[this.cursor.y+this.offset-1] != null) { this.cursor.y--; this.cursor.x = lines[this.cursor.y+this.offset].length; this.cursor.c--; }
-        await this.editor.render();
     }
 
-    async right() {
+    right() {
         const lines = this.buffer.split('\n');
         const cLine = lines[this.cursor.y+this.offset];
         if(this.cursor.x < cLine.length) { this.cursor.x++; this.cursor.c++; }
         else if(lines[this.cursor.y+this.offset+1] != null) { this.cursor.x=0;this.cursor.y++;this.cursor.c++; }
-        await this.editor.render();
     }
 
-    async up() {
+    up() {
         const lines = this.buffer.split('\n');
+
+        if(this.editor.renderMenu) {
+            this.editor.menuUp();
+            return;
+        }
 
         if(lines[this.cursor.y + this.offset - 1] != null) {
             if(this.cursor.y == 0 && this.offset > 0) this.offset--;
@@ -106,13 +109,16 @@ export class TextBuffer {
         } else {
             this.editor.bell();
         }
-
-        await this.editor.render();
     }
 
-    async down() {
+    down() {
         const termSize = Deno.consoleSize();
         const lines = this.buffer.split('\n');
+
+        if(this.editor.renderMenu) {
+            this.editor.menuDown();
+            return;
+        }
 
         if(lines[this.cursor.y+this.offset+1] != null) {
             if(this.cursor.y == termSize.rows-4) {
@@ -130,11 +136,9 @@ export class TextBuffer {
         } else {
             this.editor.bell();
         }
-
-        await this.editor.render();
     }
 
-    async moveCursor(x: number, y: number) {
+    moveCursor(x: number, y: number) {
         const termSize = Deno.consoleSize();
         if(termSize.rows-1 >= y) {
             this.cursor.y = y;
@@ -147,25 +151,26 @@ export class TextBuffer {
         }
 
         this.cursor.x = x;
-
-        await this.editor.render();
     }
 }
 
 export class Editor {
     config: { drawLines: boolean, listenBell: boolean, tab: number };
 
-    mode = Mode.NORMAL;     // Mode for input
-    debugMessage = '';      // Debug message shown on the info bar
+    mode = Mode.NORMAL;         // Mode for input
+    debugMessage = '';          // Debug message shown on the info bar
     
-    cm: CommandManager;     // Command manager
-    tm: ThemeManager;       // Theme manager
+    cm: CommandManager;         // Command manager
+    tm: ThemeManager;           // Theme manager
 
-    // file = '';              // File name
-    popupText = '';         // Text for popup
-    popupVisible = false;   // Whether or not the popup is visible
-    renderMenu = false;     // Whether or not the menu should be rendered
+    // file = '';               // File name
+    popupText = '';             // Text for popup
+    popupVisible = false;       // Whether or not the popup is visible
     
+    renderMenu = false;         // Whether or not the menu should be rendered
+    selectedMenuItem: number;   // 
+    
+
     console: TextBuffer;    // Buffer for logging
     buffers: TextBuffer[];  // List of buffers
     acBuf: number;          // Pointer to active buffer in buffers
@@ -187,6 +192,8 @@ export class Editor {
 
         this.buffers.push(new TextBuffer(this));
         this.acBuf = 0;
+
+        this.selectedMenuItem = 0;
 
         this.cm.init();
     }
@@ -218,16 +225,26 @@ export class Editor {
         curBuf.cursor.sel_y = y+curBuf.getOffset();
     }
 
-    async selectLeft() {
+    selectLeft() {
         const curBuf = this.buffers[this.acBuf];
 
-        await curBuf.left();
+        curBuf.left();
     }
     
-    async selectRight() {
+    selectRight() {
         const curBuf = this.buffers[this.acBuf];
 
-        await curBuf.right();
+        curBuf.right();
+    }
+
+    menuUp() {
+        if(this.selectedMenuItem > 0) {
+            this.selectedMenuItem--;
+        }
+    }
+
+    menuDown() {
+
     }
 
     protected async clear(background: number[]) {
@@ -237,9 +254,8 @@ export class Editor {
             t += ' ';
         }
 
-        console.clear();
-        writeAllSync(Deno.stdout, new TextEncoder().encode(t));
         await goTo(0, 0);
+        writeAllSync(Deno.stdout, new TextEncoder().encode(t));
     }
 
     protected async drawPopup() {
@@ -247,8 +263,6 @@ export class Editor {
 
         const width = this.popupText.length+4;
         const height = 5;
-
-        await save();
 
         let x = 0;
         let y = 0;
@@ -276,12 +290,9 @@ export class Editor {
         writeAllSync(Deno.stdout, new TextEncoder().encode(mid));
         await goTo(x-Math.floor(width/2), y-Math.floor(height/2)+4);
         writeAllSync(Deno.stdout, new TextEncoder().encode(bot));
-
-        await restore();
     }
 
     protected async drawBuffer(hl: Highlighter) {
-        await save();
         await goTo(0, 0);
     
         const termSize = Deno.consoleSize();
@@ -302,7 +313,7 @@ export class Editor {
             const selectedLine = ((i == (curBuf.getCursor().y+offset)) ? this.col(this.tm.get('selected_line')) : this.col(this.tm.get('background')));
 
             if(lines[i] != undefined) {
-                let line = lines[i].substring(0, termSize.columns);
+                let line = lines[i].substring(0, termSize.columns-this.stripAnsi(lineNum).length);
 
                 if(this.mode == Mode.SELECT) {
                     if(curBuf.cursor.sel_y == i) {
@@ -323,16 +334,12 @@ export class Editor {
 
             renderedLines++;
         }
-    
-        await restore();
     }
 
     protected async drawMenu() {
         const termSize = Deno.consoleSize();
         const menuHeight = 10;
         const menuWidth = 20;
-        
-        await save();
 
         const cursor = this.buffers[this.acBuf].getCursor();
 
@@ -340,15 +347,13 @@ export class Editor {
             for(let i=0;i<menuHeight;i++) {
                 await goTo(cursor.x+4, cursor.y+i+2);
                 const menuLine = ` ${this.col(this.tm.get('menu_bar_object'), true)}\uea8c${this.col(this.tm.get('foreground'), true)} hello`;
-                const highlight = ((i == 0) ? this.col(this.tm.get('menu_bar_selected')) : '');
-                writeAllSync(Deno.stdout, new TextEncoder().encode(this.tm.get('menu_bar_back') + highlight + this.col(this.tm.get('foreground'),true) + menuLine + this.makeWhitespace(menuWidth-this.stripAnsi(menuLine).length) + this.col(this.tm.get('menu_bar_back'))));
+                const highlight = ((i == this.selectedMenuItem) ? this.col(this.tm.get('menu_bar_selected')) : '');
+                writeAllSync(Deno.stdout, new TextEncoder().encode(this.col(this.tm.get('menu_bar_back')) + highlight + this.col(this.tm.get('foreground'),true) + menuLine + this.makeWhitespace(menuWidth-this.stripAnsi(menuLine).length) + this.col(this.tm.get('menu_bar_back'))));
             }
         }
-
-        await restore();
     }
 
-    protected makeWhitespace(amount: number) {
+    makeWhitespace(amount: number) {
         let s = '';
         for(let i=0;i<amount;i++) s+=' ';
         return s;
@@ -366,12 +371,8 @@ export class Editor {
 
         t += mRight;
     
-        await save();
-    
         await goTo(0, termSize.rows-1);
         writeAllSync(Deno.stdout, new TextEncoder().encode(t));
-    
-        await restore();
     }
 
     protected async drawCommandBar(msg: string) {
@@ -387,12 +388,8 @@ export class Editor {
             else          t+=' ';
         }
     
-        await save();
-    
         await goTo(0, termSize.rows);
         writeAllSync(Deno.stdout, new TextEncoder().encode(t));
-    
-        await restore();
     }
 
     protected loadThemes() {
@@ -444,7 +441,7 @@ export class Editor {
     stripAnsi(s: string): string { return s.replaceAll(ansiRegex(), ''); }
 
     async showPopup() { this.mode = Mode.POPUP; this.popupVisible = true; await this.render(); }
-    async closePopup() { this.mode = Mode.NORMAL; this.popupVisible = false; await this.render(); }
+    closePopup() { this.mode = Mode.NORMAL; this.popupVisible = false; }
 
     async render() {
         const c = Deno.consoleSize();
@@ -473,9 +470,11 @@ export class Editor {
             }
         }
 
+        await hideCursor();
+
         await this.clear(this.tm.get('background'));
         await this.drawBuffer(new HighlighterNone(this.tm));
-        await this.drawInfoBar(`${curBuf.canWrite ? '':'(RO) '}${mode} ${this.col(this.tm.get('info_bar_front'),true)}${this.debugMessage} ${tabs}`, `${cursorPos} ${amount}`, this.tm.get('info_bar_back'));
+        await this.drawInfoBar(`${mode} ${curBuf.canWrite ? '':'(RO) '} ${this.col(this.tm.get('info_bar_front'),true)}${this.debugMessage} ${tabs}`, `${cursorPos} ${amount}`, this.tm.get('info_bar_back'));
         await this.drawCommandBar(this.command.getBuf());
         if(this.renderMenu) await this.drawMenu();
         
@@ -488,6 +487,10 @@ export class Editor {
             await goTo(cursor.x+1+((this.config.drawLines) ? (this.getLineNum(0, lines).length+1) : 0), (cursor.y>0)?(cursor.y+1):(cursor.y));
         }
 
+        await showCursor();
+
+        // Change cursor depending on what you're doing
+        // @TODO make this a configurable item
         if(this.mode == Mode.NORMAL) {
             writeAllSync(Deno.stdout, new TextEncoder().encode('\x1b[\x31 q'));
         } else {
@@ -549,7 +552,6 @@ export class Editor {
         acBuf.setHasBufSaved(false);
 
         acBuf.setBuf(buffer.slice(0, cursor.c).concat(buffer.slice(cursor.c+1)));
-        await this.render();
     }
 
     async removeChar(inCommand = false) {
@@ -581,7 +583,6 @@ export class Editor {
 
         acBuf.setBuf(buffer.slice(0, cursor.c-1).concat(buffer.slice(cursor.c)));
         cursor.c--;
-        await this.render();
     }
 
     async exit(code = 0) {
@@ -682,21 +683,20 @@ for await (const keypress of readKeypress()) {
 
             case ':':
                 editor.mode = Mode.COMMAND;
-                await editor.render();
             break;
 
-            case 'left':    await activeBuf.left();     break;
-            case 'right':   await activeBuf.right();    break;
-            case 'up':      await activeBuf.up();       break;
-            case 'down':    await activeBuf.down();     break;
-            default:        editor.bell();              break;
+            case 'left':    activeBuf.left();     break;
+            case 'right':   activeBuf.right();    break;
+            case 'up':      activeBuf.up();       break;
+            case 'down':    activeBuf.down();     break;
+            default:        editor.bell();        break;
         }
     } else if(editor.mode == Mode.INSERT) {
         switch(keypress.key) {
-            case 'left':    await activeBuf.left();     break;
-            case 'right':   await activeBuf.right();    break;
-            case 'up':      await activeBuf.up();       break;
-            case 'down':    await activeBuf.down();     break;
+            case 'left':    activeBuf.left();     break;
+            case 'right':   activeBuf.right();    break;
+            case 'up':      activeBuf.up();       break;
+            case 'down':    activeBuf.down();     break;
 
             case 'end':
 
@@ -718,17 +718,16 @@ for await (const keypress of readKeypress()) {
 
             case 'return':
                 await editor.writeToBuf('\n');
-                await editor.render(); editor.buffers[editor.acBuf].hasSaved = false;
+                editor.buffers[editor.acBuf].hasSaved = false;
             break;
 
             case 'escape':
                 editor.mode = Mode.NORMAL;
-                await editor.render();
             break;
 
-            case '\x1f':
-                editor.openMenu();
-                await editor.render();
+            case '`':
+                if(keypress.ctrlKey) editor.openMenu();
+                else await editor.writeToBuf('`');
             break;
 
             case '/':
@@ -743,8 +742,8 @@ for await (const keypress of readKeypress()) {
         }
     } else if(editor.mode == Mode.COMMAND) {
         switch(keypress.key) {
-            case 'left': if(editor.command.cursor.x>0) { editor.command.cursor.x--; } await editor.render(); break;
-            case 'right': { if(editor.command.cursor.c < editor.command.getBuf().length) { editor.command.cursor.x++; } await editor.render(); break; }
+            case 'left': if(editor.command.cursor.x>0) { editor.command.cursor.x--; } break;
+            case 'right': { if(editor.command.cursor.c < editor.command.getBuf().length) { editor.command.cursor.x++; } break; }
             case 'backspace': if(editor.command.getBuf().length >= 1) await editor.removeChar(true); else editor.bell(); break;
             case 'delete': if(editor.command.getBuf().length >= 1) { await editor.removeCharForward(true); } else editor.bell(); break;
 
@@ -767,15 +766,15 @@ for await (const keypress of readKeypress()) {
             default: await editor.writeToBuf(keypress.key, true); break;
         }
     } else if(editor.mode == Mode.POPUP) {
-        await editor.closePopup();
+        editor.closePopup();
 
         if(keypress.key == ':') {
             editor.mode = Mode.COMMAND;
         }
     } else if(editor.mode == Mode.SELECT) {
         switch(keypress.key) {
-            case 'right': await editor.selectRight(); await editor.render(); break;
-            case 'left':  await editor.selectLeft();  await editor.render(); break;
+            case 'right': editor.selectRight(); break;
+            case 'left':  editor.selectLeft();  break;
 
             case 'escape':
                 editor.mode = Mode.NORMAL;
@@ -787,10 +786,10 @@ for await (const keypress of readKeypress()) {
         }
     } else if(editor.mode == Mode.DOCS) {
         switch(keypress.key) {
-            case 'left':    await activeBuf.left();     break;
-            case 'right':   await activeBuf.right();    break;
-            case 'up':      await activeBuf.up();       break;
-            case 'down':    await activeBuf.down();     break;
+            case 'left':    activeBuf.left();     break;
+            case 'right':   activeBuf.right();    break;
+            case 'up':      activeBuf.up();       break;
+            case 'down':    activeBuf.down();     break;
 
             case 'return':
                 editor.docReturn();

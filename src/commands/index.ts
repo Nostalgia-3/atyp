@@ -210,6 +210,25 @@ export class CommandManager {
             editor.buffers.push(editor.console);
             editor.acBuf = editor.buffers.length-1;
         });
+
+        this.register('commands', { name: 'commands', description: 'Opens a buffer containing all commands', usage: 'commands' }, async(_args: string[], editor: Editor) => {
+            const buf = new TextBuffer(editor, 'Commands', false);
+
+            let commands = '';
+
+            let i=0;
+
+            this.commands.forEach((v)=>{
+                commands+=` - ${v.help.name}${editor.makeWhitespace(8-v.help.name.length)} : ${v.help.description}`;
+                i++;
+                if(i != this.commands.size) commands+='\n';
+            });
+
+            buf.writeBuf(`Commands:\n${commands}`);
+
+            editor.buffers.push(buf);
+            editor.acBuf = editor.buffers.length-1;
+        });
     }
 
     register(name: string, help: Help, onRun: (args: string[], editor: Editor)=>Promise<void>) {
