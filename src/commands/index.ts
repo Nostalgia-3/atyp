@@ -181,7 +181,7 @@ export class CommandManager {
             editor.buffers.push(new TextBuffer(editor, undefined, false));
             editor.acBuf = editor.buffers.length-1;
 
-            editor.buffers[editor.acBuf].writeBuf(`This is a help menu! It is also not yet implemented, so oops :P`);
+            editor.buffers[editor.acBuf].unsafeSetBuf(`This is a help menu! It is also not yet implemented, so oops :P`);
         });
 
         this.register('lt', { name: 'lt', description: 'Loads a theme from a JSON file', usage: 't <file: string>' }, async function(args: string[], editor: Editor) {
@@ -224,7 +224,7 @@ export class CommandManager {
                 if(i != this.commands.size) commands+='\n';
             });
 
-            buf.writeBuf(`Commands:\n${commands}`);
+            buf.unsafeSetBuf(`Commands:\n${commands}`);
 
             editor.buffers.push(buf);
             editor.acBuf = editor.buffers.length-1;

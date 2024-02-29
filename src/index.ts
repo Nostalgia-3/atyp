@@ -7,6 +7,8 @@ import { HighlighterNone } from "./builtin.ts";
 import { Highlighter } from './highlighter.ts';
 import { DEFAULT_THEME, ThemeManager } from './theme.ts'
 
+export const linkRegex = /^{.+}$/g;
+
 // Taken from https://deno.land/x/dir
 function home_dir(): string | null {
     switch (Deno.build.os) {
@@ -65,7 +67,7 @@ export class TextBuffer {
     getCursor() { return this.cursor; }
 
     setBuf(buf: string) { if(!this.canWrite) return; this.buffer = buf; }
-    writeBuf(buf: string) { this.buffer = buf; }
+    unsafeSetBuf(buf: string) { this.buffer = buf; }
     setHasBufSaved(b: boolean) { this.hasSaved = b; }
 
     getLinesBefore(lines: string[], i: number) {
@@ -163,7 +165,6 @@ export class Editor {
     cm: CommandManager;         // Command manager
     tm: ThemeManager;           // Theme manager
 
-    // file = '';               // File name
     popupText = '';             // Text for popup
     popupVisible = false;       // Whether or not the popup is visible
     
@@ -204,14 +205,34 @@ export class Editor {
 
         // Get all of the "links," AKA {link}
 
-        this.findLinkLocations(curBuf.getBuf());
+        const locations = this.findLinkLocations(curBuf.getBuf());
+
+        for(let i=0;i<locations.length;i++) {
+            if(locations[i].pos[1] == curBuf.cursor.y && curBuf.cursor.x >= locations[i].pos[0] && curBuf.cursor.x <= locations[i].pos[0]+locations[i].len) {
+                this.console.unsafeSetBuf(this.console.getBuf()+locations[i].location+'\n');
+            }
+        }
     }
 
     findLinkLocations(file: string) {
         const sections = file.split('\n');
+
+        const links: { location: string, pos: number[], len: number }[] = [];
+
+        console.clear();
+
         for(let i=0;i<sections.length;i++) {
-            this.console.setBuf(this.console.getBuf() + `${i} | ${sections[i]}: ${sections[i].search(/{.+}/)}\n`);
+            const pieces = sections[i].split(' ');
+            for(let x=0;x<pieces.length;x++) {
+                const matches = pieces[x].match(linkRegex);
+
+                if(matches == null) continue;
+
+                links.push({ location: matches[0].substring(1, matches[0].length-1), pos: [pieces.slice(0, x).join(' ').length, i], len: matches[0].length });
+            }
         }
+
+        return links;
     }
 
     select() {
