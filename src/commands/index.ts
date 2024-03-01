@@ -72,24 +72,22 @@ export class CommandManager {
 
         this.register('wq', { name: 'wq', description: 'Closes editor and writes to file, but does not run if all of the buffers aren\'t saved', usage: 'wq [file: string]' }, async(args: string[], editor: Editor) => {
             const curBuf = editor.buffers[editor.acBuf];
-    
+
             if(args[0]) {
-                editor.buffers[editor.acBuf].file = args[0];
-    
-                Deno.writeFileSync(args[0], new TextEncoder().encode(curBuf.getBuf()));
-                curBuf.hasSaved = true;
+                if(curBuf.canWrite) editor.buffers[editor.acBuf].file = args[0];
+
+                if(curBuf.canWrite) Deno.writeFileSync(args[0], new TextEncoder().encode(curBuf.getBuf()));
+                if(curBuf.canWrite) curBuf.hasSaved = true;
                 Deno.exit(0);
             } else if(!args[0] && !editor.buffers[editor.acBuf].file) {
-                editor.spawnError(`(W)rite (Q)uit required at least one argument. Provided 0.`);
+                if(curBuf.canWrite) editor.spawnError(`(W)rite (Q)uit required at least one argument. Provided 0.`);
                 Deno.exit(0);
             } else {
-                Deno.writeFileSync(editor.buffers[editor.acBuf].file as string, new TextEncoder().encode(curBuf.getBuf()));
-                curBuf.hasSaved = true;
+                if(curBuf.canWrite) Deno.writeFileSync(editor.buffers[editor.acBuf].file as string, new TextEncoder().encode(curBuf.getBuf()));
+                if(curBuf.canWrite) curBuf.hasSaved = true;
                 editor.mode = Mode.NORMAL;
                 return;
             }
-    
-            editor.mode = Mode.NORMAL;
         });
 
         this.register('q!', { name: 'q!', description: 'Forces the editor to quit', usage: 'q!' }, async(_args: string[], editor: Editor) => {
@@ -99,6 +97,8 @@ export class CommandManager {
         this.register('w', { name: 'w', description: 'Writes to the open buffer', usage: 'w [file: string]' }, async(args: string[], editor: Editor) => {
             const curBuf = editor.buffers[editor.acBuf];
     
+            if(!curBuf.canWrite) return;
+
             if(args[0]) {
                 editor.buffers[editor.acBuf].file = args[0];
     
@@ -177,11 +177,23 @@ export class CommandManager {
             }
         });
 
-        this.register('h', { name: 'h', description: 'Opens a readonly text buffer containing information about the editor', usage: 'h' }, async function(_args: string[], editor: Editor) {
-            editor.buffers.push(new TextBuffer(editor, undefined, false));
+        this.register('h', { name: 'h', description: 'Opens a readonly text buffer containing information about the editor', usage: 'h' }, async(_args: string[], editor: Editor) => {
+            editor.buffers.push(new TextBuffer(editor, 'Help', false));
             editor.acBuf = editor.buffers.length-1;
 
-            editor.buffers[editor.acBuf].unsafeSetBuf(`This is a help menu! It is also not yet implemented, so oops :P`);
+            const buf = editor.buffers[editor.acBuf];
+
+            let commands = '';
+
+            let i=0;
+
+            this.commands.forEach((v)=>{
+                commands+=`    ${v.help.name}${editor.makeWhitespace(8-v.help.name.length)} : ${v.help.description}`;
+                i++;
+                if(i != this.commands.size) commands+='\n';
+            });
+
+            buf.unsafeSetBuf(`-= HELP =-\n  Commands:\n${commands}`);
         });
 
         this.register('lt', { name: 'lt', description: 'Loads a theme from a JSON file', usage: 't <file: string>' }, async function(args: string[], editor: Editor) {
@@ -208,25 +220,6 @@ export class CommandManager {
 
         this.register('oc', { name: 'oc', description: 'Opens a copy of the console buffer', usage: 'oc' }, async function(_args: string[], editor: Editor) {
             editor.buffers.push(editor.console);
-            editor.acBuf = editor.buffers.length-1;
-        });
-
-        this.register('commands', { name: 'commands', description: 'Opens a buffer containing all commands', usage: 'commands' }, async(_args: string[], editor: Editor) => {
-            const buf = new TextBuffer(editor, 'Commands', false);
-
-            let commands = '';
-
-            let i=0;
-
-            this.commands.forEach((v)=>{
-                commands+=` - ${v.help.name}${editor.makeWhitespace(8-v.help.name.length)} : ${v.help.description}`;
-                i++;
-                if(i != this.commands.size) commands+='\n';
-            });
-
-            buf.unsafeSetBuf(`Commands:\n${commands}`);
-
-            editor.buffers.push(buf);
             editor.acBuf = editor.buffers.length-1;
         });
     }
