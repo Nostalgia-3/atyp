@@ -32,7 +32,7 @@ export class ThemeManager {
         const theme = this.themes.get(id);
 
         if(theme == undefined) {
-            await this.editor.spawnError(`Unknown theme id: ${id}`);
+            this.editor.spawnError(`Unknown theme id: ${id}`);
             return;
         }
 

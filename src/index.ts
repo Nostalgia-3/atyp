@@ -1,5 +1,5 @@
 import { goTo, showCursor, hideCursor } from "https://denopkg.com/iamnathanj/cursor@v2.2.0/mod.ts";
-import { writeAllSync } from "https://deno.land/std@0.216.0/io/write_all.ts";
+import { writeAll, writeAllSync } from "https://deno.land/std@0.216.0/io/write_all.ts";
 import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 import { existsSync } from "https://deno.land/std@0.216.0/fs/mod.ts";
 import { CommandManager } from './commands/index.ts';
@@ -301,16 +301,19 @@ export class Editor {
         x = Math.floor(termSize.columns/2);
         y = Math.floor(termSize.rows/2);
 
-        await goTo(x-Math.floor(width/2), y-Math.floor(height/2));
-        writeAllSync(Deno.stdout, new TextEncoder().encode(top));
-        await goTo(x-Math.floor(width/2), y-Math.floor(height/2)+1);
-        writeAllSync(Deno.stdout, new TextEncoder().encode(mid));
+        const w = Math.floor(width/2);
+        const h = Math.floor(height/2);
+
+        await goTo(x-w, y-h);
+        await writeAll(Deno.stdout, new TextEncoder().encode(top));
+        await goTo(x-w, y-h+1);
+        await writeAll(Deno.stdout, new TextEncoder().encode(mid));
         await goTo(x-Math.floor((this.popupText.length+4)/2), y);
-        writeAllSync(Deno.stdout, new TextEncoder().encode('│ ' + this.popupText + ' │'));
-        await goTo(x-Math.floor(width/2), y-Math.floor(height/2)+3);
-        writeAllSync(Deno.stdout, new TextEncoder().encode(mid));
-        await goTo(x-Math.floor(width/2), y-Math.floor(height/2)+4);
-        writeAllSync(Deno.stdout, new TextEncoder().encode(bot));
+        await writeAll(Deno.stdout, new TextEncoder().encode('│ ' + this.popupText + ' │'));
+        await goTo(x-w, y-h+3);
+        await writeAll(Deno.stdout, new TextEncoder().encode(mid));
+        await goTo(x-w, y-h+4);
+        await writeAll(Deno.stdout, new TextEncoder().encode(bot));
     }
 
     protected async drawBuffer(hl: Highlighter) {
@@ -461,7 +464,7 @@ export class Editor {
 
     stripAnsi(s: string): string { return s.replaceAll(ansiRegex(), ''); }
 
-    async showPopup() { this.mode = Mode.POPUP; this.popupVisible = true; await this.render(); }
+    showPopup() { this.mode = Mode.POPUP; this.popupVisible = true; }
     closePopup() { this.mode = Mode.NORMAL; this.popupVisible = false; }
 
     async render() {
@@ -607,20 +610,20 @@ export class Editor {
     }
 
     async exit(code = 0) {
+        writeAllSync(Deno.stdout, new TextEncoder().encode('\x1b[0m\x1b[\x35 q'));
         await showCursor();
-        writeAllSync(Deno.stdout, new TextEncoder().encode('\x1b[0m'));
         console.clear();
         Deno.exit(code);
     }
 
-    async spawnError(msg: string) {
+    spawnError(msg: string) {
         // create a popup that is on the middle of the screen
         this.popupText = msg;
-        await this.showPopup();
+        this.showPopup();
         this.bell();
     }
 
-    async runCommand(c: string) {
+    runCommand(c: string) {
         const cleanedString = c.trim();
         const sections = cleanedString.split(' ');
 
@@ -629,7 +632,7 @@ export class Editor {
         const ce = this.cm.run(sections[0], sections.slice(1));
 
         if(!ce) {
-            await this.spawnError(`Unknown command: ${sections[0]}`);
+            this.bell();
         }
     }
 
@@ -772,7 +775,7 @@ for await (const keypress of readKeypress()) {
             case 'down': break;
 
             case 'return':
-                await editor.runCommand(editor.command.getBuf());
+                editor.runCommand(editor.command.getBuf());
                 editor.command.setBuf('');
                 editor.command.cursor.x=0;
             break;

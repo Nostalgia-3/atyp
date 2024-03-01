@@ -58,7 +58,7 @@ export class CommandManager {
                 Deno.writeFileSync(args[0], new TextEncoder().encode(curBuf.getBuf()));
                 curBuf.hasSaved = true;
             } else if(!args[0] && !editor.buffers[editor.acBuf].file) {
-                await editor.spawnError(`(W)rite required at least one argument. Provided 0.`);
+                editor.spawnError(`(W)rite required at least one argument. Provided 0.`);
                 return;
             } else {
                 Deno.writeFileSync(editor.buffers[editor.acBuf].file as string, new TextEncoder().encode(curBuf.getBuf()));
@@ -80,7 +80,7 @@ export class CommandManager {
                 curBuf.hasSaved = true;
                 Deno.exit(0);
             } else if(!args[0] && !editor.buffers[editor.acBuf].file) {
-                await editor.spawnError(`(W)rite required at least one argument. Provided 0.`);
+                editor.spawnError(`(W)rite (Q)uit required at least one argument. Provided 0.`);
                 Deno.exit(0);
             } else {
                 Deno.writeFileSync(editor.buffers[editor.acBuf].file as string, new TextEncoder().encode(curBuf.getBuf()));
@@ -105,7 +105,7 @@ export class CommandManager {
                 Deno.writeFileSync(args[0], new TextEncoder().encode(curBuf.getBuf()));
                 curBuf.hasSaved = true;
             } else if(!args[0] && !editor.buffers[editor.acBuf].file) {
-                await editor.spawnError(`(W)rite required at least one argument. Provided 0.`);
+                editor.spawnError(`(W)rite required at least one argument. Provided 0.`);
                 return;
             } else {
                 Deno.writeFileSync(editor.buffers[editor.acBuf].file as string, new TextEncoder().encode(curBuf.getBuf()));
@@ -120,15 +120,15 @@ export class CommandManager {
         this.register('m', { name: 'm', description: 'Moves the cursor on the y (and optionally the x) axis', usage: 'm <y: number> [x: number]' }, async function(args: string[], editor: Editor) {
             if(args[0] && !isNaN(parseInt(args[0].toLowerCase()))) {
                 const y = parseInt(args[0].toLowerCase());
-                await editor.buffers[editor.acBuf].moveCursor(0, y-1);
+                editor.buffers[editor.acBuf].moveCursor(parseInt(args[1]) ?? 0, y-1);
             } else {
-                await editor.spawnError(`(M)ove requires at least one arg that is a number!`);
+                editor.spawnError(`(M)ove requires at least one arg that is a number!`);
             }
         });
 
         this.register('o', { name: 'o', description: 'Opens the specified file', usage: 'o <file_path: string> [buf_id: number]' }, async function(args: string[], editor: Editor) {
-            if(!args[0]) { await editor.spawnError(`(O)pen requires at least one argument. Provided 0.`); return; }
-            if(!existsSync(args[0])) { await editor.spawnError(`That file doesn't exist!`); return; }
+            if(!args[0]) { editor.spawnError(`(O)pen requires at least one argument. Provided 0.`); return; }
+            if(!existsSync(args[0])) { editor.spawnError(`That file doesn't exist!`); return; }
 
             editor.buffers.push(new TextBuffer(editor, args[0], true));
             editor.acBuf = editor.buffers.length-1;
@@ -139,20 +139,20 @@ export class CommandManager {
         });
         
         this.register('p', { name: 'p', description: 'Opens a popup with a custom message', usage: 'p <message: string>' }, async function(args: string[], editor: Editor) {
-            await editor.spawnError(args.join(' '));
+            editor.spawnError(args.join(' '));
             editor.mode = Mode.POPUP;
         });
 
         this.register('t', { name: 't', description: 'Changes the theme to the specified theme', usage: 't <theme_id: string>' }, async function(args: string[], editor: Editor) {
             if(!args[0]) {
-                await editor.spawnError(`Requires a theme as an argument`);
+                editor.spawnError(`Requires a theme as an argument`);
                 return;
             }
 
             if(editor.tm.getTheme(args[0])) {
                 await editor.tm.setTheme(args[0]);
             } else {
-                await editor.spawnError(`Unknown theme: "${args[0]}"`);
+                editor.spawnError(`Unknown theme: "${args[0]}"`);
                 return;
             }
         });
@@ -165,8 +165,8 @@ export class CommandManager {
             // TODO: Make another empty buffer if we close it
             if(editor.buffers.length == 1) return;
 
-            if(!editor.buffers[id]) { await editor.spawnError(`Buffer with id ${id} doesn't exist!`); return; }
-            if(!editor.buffers[id].hasSaved) { await editor.spawnError(`That buffer needs to be saved!`); return; }
+            if(!editor.buffers[id]) { editor.spawnError(`Buffer with id ${id} doesn't exist!`); return; }
+            if(!editor.buffers[id].hasSaved) { editor.spawnError(`That buffer needs to be saved!`); return; }
 
             editor.buffers.splice(id, 1);
 
@@ -186,12 +186,12 @@ export class CommandManager {
 
         this.register('lt', { name: 'lt', description: 'Loads a theme from a JSON file', usage: 't <file: string>' }, async function(args: string[], editor: Editor) {
             if(!args[0]) {
-                await editor.spawnError(`Requires a file as an argument`);
+                editor.spawnError(`Requires a file as an argument`);
                 return;
             }
 
             if(!existsSync(args[0])) {
-                await editor.spawnError(`That file doesn't exist!`);
+                editor.spawnError(`That file doesn't exist!`);
                 return;
             }
 
