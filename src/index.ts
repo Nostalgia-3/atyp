@@ -341,13 +341,17 @@ export class Editor {
 
                 if(this.mode == Mode.SELECT) {
                     if(curBuf.cursor.sel_y == i) {
-                        const xOff = Math.abs(curBuf.cursor.x-curBuf.cursor.sel_x);
+                        const xOff = curBuf.cursor.x-curBuf.cursor.sel_x;
 
-                        if(xOff < 0) {
-                            line = line.substring(0, curBuf.cursor.sel_x-xOff) + this.col(this.tm.get('sel_back')) + line.substring(curBuf.cursor.sel_x-xOff, curBuf.cursor.sel_x) + selectedLine + line.substring(curBuf.cursor.sel_x);
-                        } else {
+                        this.console.unsafeSetBuf(this.console.getBuf() + `xOff = ${xOff}\n`);
+
+                        if(xOff < 0) { // Going left
+                            line = line.substring(0, curBuf.cursor.sel_x+xOff) + this.col(this.tm.get('sel_back')) + line.substring(curBuf.cursor.sel_x+xOff, curBuf.cursor.sel_x) + selectedLine + line.substring(curBuf.cursor.sel_x);
+                        } else { // Going right
                             line = line.substring(0, curBuf.cursor.sel_x) + this.col(this.tm.get('sel_back')) + line.substring(curBuf.cursor.sel_x, curBuf.cursor.sel_x+xOff) + selectedLine + line.substring(curBuf.cursor.sel_x+xOff);
                         }
+                    } else {
+                        // I hate this.
                     }
                 }
 
