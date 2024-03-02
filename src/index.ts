@@ -2,6 +2,7 @@ import { goTo, showCursor, hideCursor } from "https://denopkg.com/iamnathanj/cur
 import { writeAll, writeAllSync } from "https://deno.land/std@0.216.0/io/write_all.ts";
 import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 import { existsSync } from "https://deno.land/std@0.216.0/fs/mod.ts";
+import { equal } from 'https://deno.land/x/equal@v1.5.0/mod.ts';
 import { CommandManager } from './commands/index.ts';
 import { HighlighterNone } from "./builtin.ts";
 import { Highlighter } from './highlighter.ts';
@@ -649,6 +650,10 @@ export class Editor {
         }
     }
 
+    log(v: string) {
+        this.console.setBuf(this.console.getBuf() + v + '\n');
+    }
+
     bell() {
         if(this.config.listenBell) writeAllSync(Deno.stdout, new TextEncoder().encode('\x07'));
     }
@@ -682,6 +687,23 @@ export class Editor {
 }
 
 const editor = new Editor();
+
+// This is probably not great but since apparently
+// there's no process.stdout.on('resize') equivalent
+// on Deno, I guess I have to do this
+let oldSize = Deno.consoleSize();
+
+setInterval(async() => {
+    const newSize = Deno.consoleSize();
+
+    if(!equal(oldSize, newSize)) {
+        console.clear();
+        writeAllSync(Deno.stdout, new TextEncoder().encode(`\x1b[3J`));
+        await editor.render();
+    }
+
+    oldSize = newSize;
+}, 100);
 
 if(Deno.args[0]) { editor.open(Deno.args[0]); }
 
