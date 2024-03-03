@@ -3,8 +3,11 @@ import { ThemeManager } from "./theme.ts";
 export class Highlighter {
     protected tm: ThemeManager;
 
-    constructor(tm: ThemeManager) {
+    info: { name: string, id: string, author: string };
+
+    constructor(tm: ThemeManager, info: { name: string, id: string, author: string }) {
         this.tm = tm;
+        this.info = info;
     }
 
     protected col(s: string, t: number[], b = false) {

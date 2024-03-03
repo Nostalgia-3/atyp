@@ -4,7 +4,7 @@ import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 import { existsSync } from "https://deno.land/std@0.216.0/fs/mod.ts";
 import { equal } from 'https://deno.land/x/equal@v1.5.0/mod.ts';
 import { CommandManager } from './commands/index.ts';
-import { HighlighterNone } from "./builtin.ts";
+import { HighlighterNone, HighlighterSV } from "./builtin.ts";
 import { Highlighter } from './highlighter.ts';
 import { DEFAULT_THEME, ThemeManager } from './theme.ts'
 
@@ -49,6 +49,8 @@ export class TextBuffer {
     offset = 0;
     canWrite: boolean;
     hasSaved = true;
+    acHL: Highlighter;
+
     cursor = {
         x: 0, y: 0, c: 0,
 
@@ -61,6 +63,7 @@ export class TextBuffer {
         this.editor = e;
         this.canWrite = canWrite;
         this.file = file;
+        this.acHL = new HighlighterNone(this.editor.tm);
     }
 
     getBuf() { return this.buffer; }
@@ -170,8 +173,10 @@ export class Editor {
     popupVisible = false;       // Whether or not the popup is visible
     
     renderMenu = false;         // Whether or not the menu should be rendered
-    selectedMenuItem: number;   // 
+    selectedMenuItem: number;   // The selected menu item
     
+    // acHL: Highlighter;          // Active highlighter
+    hls: Highlighter[];         // List of Highlighters
 
     console: TextBuffer;    // Buffer for logging
     buffers: TextBuffer[];  // List of buffers
@@ -186,6 +191,12 @@ export class Editor {
         this.cm = new CommandManager(this);
         this.tm = new ThemeManager(this);
 
+        this.hls = [];
+
+        // Load some base ones by default
+        this.hls.push(new HighlighterNone(this.tm));
+        this.hls.push(new HighlighterSV(this.tm));
+
         this.loadConfig();
         this.loadThemes();
 
@@ -196,6 +207,8 @@ export class Editor {
         this.acBuf = 0;
 
         this.selectedMenuItem = 0;
+
+        this.buffers[0].acHL = new HighlighterNone(this.tm);
 
         this.cm.init();
     }
@@ -502,8 +515,8 @@ export class Editor {
         await hideCursor();
 
         await this.clear(this.tm.get('background'));
-        await this.drawBuffer(new HighlighterNone(this.tm));
-        await this.drawInfoBar(`${mode} ${curBuf.canWrite ? '':'(RO) '} ${this.col(this.tm.get('info_bar_front'),true)}${this.debugMessage} ${tabs}`, `${cursorPos} ${amount}`, this.tm.get('info_bar_back'));
+        await this.drawBuffer(curBuf.acHL);
+        await this.drawInfoBar(`${mode} ${curBuf.canWrite ? '':'(RO) '} ${this.col(this.tm.get('info_bar_front'),true)}${this.debugMessage} ${tabs}`, `${curBuf.acHL.info.name} ${cursorPos} ${curBuf.cursor.c} ${amount}`, this.tm.get('info_bar_back'));
         await this.drawCommandBar(this.command.getBuf());
         if(this.renderMenu) await this.drawMenu();
         
@@ -527,14 +540,13 @@ export class Editor {
         }
     }
 
-    async writeToBuf(text: string, inCommand = false) {
+    writeToBuf(text: string, inCommand = false) {
         if(inCommand) {
             const comCursor = this.command.getCursor();
             const b = this.command.getBuf().slice(0, comCursor.x);
             const e = this.command.getBuf().slice(comCursor.x);
             this.command.setBuf(b + text + e);
             comCursor.x++;
-            await this.render();
             return;
         }
 
@@ -561,11 +573,9 @@ export class Editor {
         } else {
             cursor.x+=text.length; cursor.c+=text.length;
         }
-
-        await this.render();
     }
 
-    async removeCharForward(inCommand = false) {
+    removeCharForward(inCommand = false) {
         const acBuf  = this.buffers[this.acBuf];
         const cursor = acBuf.getCursor();
         const buffer = acBuf.getBuf();
@@ -573,7 +583,6 @@ export class Editor {
         if(inCommand) {
             if(!this.command.getBuf()[this.command.cursor.x]) return;
             this.command.setBuf(buffer.slice(0, this.command.cursor.x).concat(buffer.slice(this.command.cursor.x+1)));
-            await this.render();
         }
         
         if(!buffer[cursor.c]) return;
@@ -583,7 +592,7 @@ export class Editor {
         acBuf.setBuf(buffer.slice(0, cursor.c).concat(buffer.slice(cursor.c+1)));
     }
 
-    async removeChar(inCommand = false) {
+    removeChar(inCommand = false) {
         const acBuf  = this.buffers[this.acBuf];
         const cursor = acBuf.getCursor();
         const buffer = acBuf.getBuf();
@@ -591,7 +600,6 @@ export class Editor {
         if(inCommand) {
             this.command.setBuf(this.command.getBuf().slice(0, this.command.cursor.x-1));
             this.command.cursor.x--;
-            await this.render();
             return;
         }
     
@@ -753,21 +761,21 @@ for await (const keypress of readKeypress()) {
             break;
 
             case 'backspace':
-                await editor.removeChar();
+                editor.removeChar();
             break;
 
             case 'delete':
-                if(editor.buffers[editor.acBuf].getBuf().length >= 1) { await editor.removeCharForward(); } else editor.bell();
+                if(editor.buffers[editor.acBuf].getBuf().length >= 1) { editor.removeCharForward(); } else editor.bell();
             break;
 
             case 'tab': {
                 let s = '';
                 for(let i=0;i<editor.config.tab;i++) s+=' ';
-                await editor.writeToBuf(s);
+                editor.writeToBuf(s);
             break; }
 
             case 'return':
-                await editor.writeToBuf('\n');
+                editor.writeToBuf('\n');
                 editor.buffers[editor.acBuf].hasSaved = false;
             break;
 
@@ -777,25 +785,25 @@ for await (const keypress of readKeypress()) {
 
             case '`':
                 if(keypress.ctrlKey) editor.openMenu();
-                else await editor.writeToBuf('`');
+                else editor.writeToBuf('`');
             break;
 
             case '/':
-                await editor.writeToBuf('/');
+                editor.writeToBuf('/');
             break;
 
             case 'space':
-                await editor.writeToBuf(' ');
+                editor.writeToBuf(' ');
             break;
 
-            default: await editor.writeToBuf(keypress.key); break;
+            default: editor.writeToBuf(keypress.key); break;
         }
     } else if(editor.mode == Mode.COMMAND) {
         switch(keypress.key) {
             case 'left': if(editor.command.cursor.x>0) { editor.command.cursor.x--; } break;
             case 'right': { if(editor.command.cursor.c < editor.command.getBuf().length) { editor.command.cursor.x++; } break; }
-            case 'backspace': if(editor.command.getBuf().length >= 1) await editor.removeChar(true); else editor.bell(); break;
-            case 'delete': if(editor.command.getBuf().length >= 1) { await editor.removeCharForward(true); } else editor.bell(); break;
+            case 'backspace': if(editor.command.getBuf().length >= 1) editor.removeChar(true); else editor.bell(); break;
+            case 'delete': if(editor.command.getBuf().length >= 1) { editor.removeCharForward(true); } else editor.bell(); break;
 
             case 'up': break;
             case 'down': break;

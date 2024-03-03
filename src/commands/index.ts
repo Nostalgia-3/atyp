@@ -222,6 +222,22 @@ export class CommandManager {
             editor.buffers.push(editor.console);
             editor.acBuf = editor.buffers.length-1;
         });
+
+        this.register('hil', { name: 'hil', description: 'Selects a highlighter', usage: 'hil <id: string>' }, async(args: string[], editor: Editor) => {
+            if(args[0] == undefined) {
+                editor.spawnError(`Requires a highlighter's id!`);
+                return;
+            }
+
+            const hl = editor.hls.find((v)=>v.info.id == args[0])
+
+            if(!hl) {
+                editor.spawnError(`Couldn't find a highlighter with that id!`);
+                return;
+            }
+
+            editor.buffers[editor.acBuf].acHL = hl;
+        });
     }
 
     register(name: string, help: Help, onRun: (args: string[], editor: Editor)=>Promise<void>) {

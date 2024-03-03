@@ -3,89 +3,25 @@ import { ThemeManager } from "./theme.ts";
 
 export class HighlighterNone extends Highlighter {
     constructor(tm: ThemeManager) {
-        super(tm);
+        super(tm, {
+            name: 'None',
+            id: 'none',
+            author: 'nostalgia3'
+        });
     }
 
     parseLine(l: string): string {
         return l;
-    }
-}
-
-export class HighlighterTS extends Highlighter {
-    constructor(tm: ThemeManager) {
-        super(tm);
-    }
-
-    parseLine(l: string): string {
-        return l;
-        
-        // const j = l.split('//');
-
-        // const t = new Tokenizer([
-        //     { type: 'STRING', pattern: /\".*\"/ },
-        //     { type: 'IDEN', pattern: /[a-zA-Z]+[a-zA-Z0-9]*/ },
-        //     { type: 'NUM', pattern: /(0[Xx][0-9A-Fa-f]+)|([0-9]+)/ },
-        //     { type: 'LEFT_PAREN', pattern: '(' },
-        //     { type: 'RIGHT_PAREN', pattern: ')' },
-        //     { type: 'LEFT_BRACKET', pattern: '{' },
-        //     { type: 'RIGHT_BRACKET', pattern: '}' },
-        //     { type: 'COLON', pattern: ':' },
-        //     { type: 'SEMICOLON', pattern: ';' },
-        //     { type: 'COMMA', pattern: ',' },
-        //     { type: 'EQUALS', pattern: '=' },
-        //     { type: 'WHITESPACE', pattern: /[ ]+/ },
-        //     { type: 'KEYWORD', pattern: /(break)|(as)|(any)|(switch)|(case)|(if)|(throw)|(else)|(var)|(get)|(module)|(type)|(instanceof)|(typeof)|(public)|(private)|(enum)|(export)|(finally)|(for)|(while)|(super)|(this)|(new)|(in)|(return)|(true)|(false)|(extends)|(static)|(let)|(package)|(implements)|(interface)|(function)|(new)|(try)|(yield)|(const)|(continue)|(do)|(catch)/ },
-        //     { type: 'BUILTIN_TYPE', pattern: /(void)|(number)|(string)|(null)|(any)/ }
-        // ]);
-
-        // const toks = t.tokenize(j[0]);
-        // let m = '';
-
-        // for(let i=0;i<toks.length;i++) {
-        //     switch(toks[i].type) {
-        //         case 'STRING':
-        //             m += this.col(toks[i].value, this.theme.green);
-        //         break;
-
-        //         case 'IDEN':
-        //             m += this.col(toks[i].value, this.theme.lred);
-        //         break;
-
-        //         case 'NUM':
-        //             m += this.col(toks[i].value, this.theme.lyellow);
-        //         break;
-
-        //         case 'KEYWORD':
-        //             m += this.col(toks[i].value, this.theme.magenta);
-        //         break;
-
-        //         case 'BUILTIN_TYPE':
-        //             m += this.col(toks[i].value, this.theme.cyan);
-        //         break;
-
-        //         case 'LEFT_PAREN':
-        //         case 'RIGHT_PAREN':
-        //         case 'LEFT_BRACKET':
-        //         case 'RIGHT_BRACKET':
-        //         case 'COLON':
-        //         case 'SEMICOLON':
-        //         case 'EQUALS':
-        //             m += this.col(toks[i].value, this.tm.get('foreground'));
-        //         break;
-
-        //         case 'WHITESPACE':
-        //             m += toks[i].value;
-        //         break;
-        //     }
-        // }
-        
-        // return m + (j[1] ? this.col('//' + j[1], this.theme.gray2) : '');
     }
 }
 
 export class HighlighterSV extends Highlighter {
     constructor(tm: ThemeManager) {
-        super(tm);
+        super(tm, {
+            name: 'SV16-ASM',
+            id: 'sv16',
+            author: 'nostalgia3'
+        });
     }
 
     getToken(s: string) {
@@ -164,12 +100,14 @@ export class HighlighterSV extends Highlighter {
     }
 
     parseLine(l: string): string {
-        const pieces = this.split(l);
+        const pl = l.split('#')[0];
+        const com = l.split('#')[1];
+        const pieces = this.split(pl);
 
         for(let i=0;i<pieces.length;i++) {
             pieces[i] = this.getToken(pieces[i]);
         }
 
-        return pieces.join(' ');
+        return pieces.join(' ') + (com ? this.col('#' + com, this.tm.get('comment')) : this.col('', this.tm.get('foreground')));
     }
 }
