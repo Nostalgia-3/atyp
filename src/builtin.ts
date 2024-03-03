@@ -108,6 +108,6 @@ export class HighlighterSV extends Highlighter {
             pieces[i] = this.getToken(pieces[i]);
         }
 
-        return pieces.join(' ') + (com ? this.col('#' + com, this.tm.get('comment')) : this.col('', this.tm.get('foreground')));
+        return pieces.join(' ') + (com != undefined ? this.col('#' + com, this.tm.get('comment')) : this.col('', this.tm.get('foreground')));
     }
 }
