@@ -552,6 +552,12 @@ export class Editor {
 
         const activeBuf = this.buffers[this.acBuf];
 
+        if(!activeBuf.canWrite) {
+            this.bell();
+            
+            return;
+        }
+
         activeBuf.setHasBufSaved(false);
         const cursor = activeBuf.getCursor();
         const buffer = activeBuf.getBuf();
@@ -583,6 +589,11 @@ export class Editor {
         if(inCommand) {
             if(!this.command.getBuf()[this.command.cursor.x]) return;
             this.command.setBuf(buffer.slice(0, this.command.cursor.x).concat(buffer.slice(this.command.cursor.x+1)));
+        }
+
+        if(!acBuf.canWrite) {
+            editor.bell();
+            return;
         }
         
         if(!buffer[cursor.c]) return;

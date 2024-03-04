@@ -164,9 +164,29 @@ export class CommandManager {
 
             // TODO: Make another empty buffer if we close it
             if(editor.buffers.length == 1) return;
+            if(!editor.buffers[id]) return;
 
             if(!editor.buffers[id]) { editor.spawnError(`Buffer with id ${id} doesn't exist!`); return; }
             if(!editor.buffers[id].hasSaved) { editor.spawnError(`That buffer needs to be saved!`); return; }
+
+            editor.buffers.splice(id, 1);
+
+            // Only go forward/backward if we closed the tab open
+            if(id == editor.acBuf) {
+                if(editor.buffers[id-1]) editor.acBuf = id-1;
+                else editor.acBuf = id+1;
+            }
+        });
+
+        this.register('c!', { name: 'c!', description: 'Closes a buffer', usage: 'c [id: number]' }, async function(args, editor) {
+            let id = (args[0] == undefined) ? editor.acBuf : parseInt(args[0]);
+
+            if(isNaN(id)) id = editor.acBuf;
+
+            // TODO: Make another empty buffer if we close it
+            if(editor.buffers.length == 1) return;
+
+            if(!editor.buffers[id]) { editor.spawnError(`Buffer with id ${id} doesn't exist!`); return; }
 
             editor.buffers.splice(id, 1);
 
@@ -237,6 +257,45 @@ export class CommandManager {
             }
 
             editor.buffers[editor.acBuf].acHL = hl;
+        });
+
+        this.register('r', { name: 'r', description: 'Runs a command in shell, opening stdout as a buffer', usage: 'r <command: string>' }, async(args: string[], editor: Editor) => {
+            const com = args[0];
+            const arg = args.slice(1);
+
+            editor.log(com + `\n`);
+
+            if(!com) {
+                editor.spawnError(`Requires a command! Usage: ${this.commands.get('r')?.help.usage}`);
+                return;
+            }
+
+            let command: Deno.Command;
+
+            if(Deno.build.os == 'windows') {
+                command = new Deno.Command('cmd', { args: ['/c', com].concat(arg) })
+            } else {
+                command = new Deno.Command(com, { args: arg });
+            }
+
+            const b = new TextBuffer(editor, `${com} ${arg.join(' ')}`, false);
+
+            b.unsafeSetBuf(`Waiting for program to finish running...`);
+
+            editor.buffers.push(b);
+            editor.acBuf = editor.buffers.length-1;
+
+            try {
+                command.output().then(async(v) => {
+                    const d = new TextDecoder();
+                    
+                    b.unsafeSetBuf(`${d.decode((v.success) ? v.stdout : v.stderr).replaceAll('\r', '')}\nProgram closed with code ${v.code}.`);
+
+                    await editor.render();
+                });
+            } catch(e) {
+                editor.spawnError(`${e}`);
+            }
         });
     }
 
