@@ -1,4 +1,5 @@
 import { ThemeManager } from "./theme.ts";
+import { MenuItem } from './index.ts';
 
 export class Highlighter {
     protected tm: ThemeManager;
@@ -15,6 +16,10 @@ export class Highlighter {
     }
     
     parseLine(_l: string): string {
+        throw new Error(`Hey, you can't use the base Highlighter class!`);
+    }
+
+    getMenuItems(_file: string): MenuItem[] {
         throw new Error(`Hey, you can't use the base Highlighter class!`);
     }
 }

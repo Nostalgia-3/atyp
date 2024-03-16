@@ -309,9 +309,9 @@ export class Editor {
         curBuf.right();
     }
 
+    // This isn't how I want it to work. Figure it out
     menuSelect() {
         this.writeToBuf(this.menuItems[this.selectedMenuItem].value);
-        
     }
 
     menuUp() {
@@ -435,6 +435,11 @@ export class Editor {
 
         if(cursor.y+this.menuItems.length < termSize.rows-2) { // Draw down
             for(let i=0;i<this.menuItems.length;i++) {
+                if(!this.menuItems[i] || !this.menuItems[i].type) {
+                    this.log(`[!] ${this.menuItems[i]} doesn't have a type!`);
+                    continue;
+                }
+
                 await goTo(cursor.x+4, cursor.y+i+2);
                 const menuLine = ` ${this.col(this.tm.get('menu_bar_' + names[this.menuItems[i].type]), true)}${icons[this.menuItems[i].type]}${this.col(this.tm.get('foreground'), true)} ${this.menuItems[i].value}`;
                 const highlight = ((i == this.selectedMenuItem) ? this.col(this.tm.get('menu_bar_selected')) : '');
@@ -586,7 +591,14 @@ export class Editor {
         await this.drawBuffer(curBuf.acHL);
         await this.drawInfoBar(`${mode} ${curBuf.canWrite ? '':'(RO) '} ${this.col(this.tm.get('info_bar_front'),true)}${this.debugMessage} ${tabs}`, `${curBuf.acHL.info.name} ${cursorPos} ${curBuf.cursor.c} ${amount}`, this.tm.get('info_bar_back'));
         await this.drawCommandBar(this.command.getBuf());
-        if(this.renderMenu) await this.drawMenu();
+        if(this.renderMenu) {
+            this.menuItems = curBuf.acHL.getMenuItems(buffer);
+
+            if(this.menuItems.length == 0) {
+                this.renderMenu = false;
+                this.bell();
+            } else await this.drawMenu();
+        }
         
         if(this.mode == Mode.POPUP) await this.drawPopup();
         
@@ -883,6 +895,7 @@ for await (const keypress of readKeypress()) {
             break;
 
             case 'escape':
+                if(editor.renderMenu) editor.renderMenu = false;
                 editor.mode = Mode.NORMAL;
             break;
 
@@ -896,6 +909,7 @@ for await (const keypress of readKeypress()) {
             break;
 
             case 'space':
+                if(editor.renderMenu) editor.renderMenu = false;
                 editor.writeToBuf(' ');
             break;
 

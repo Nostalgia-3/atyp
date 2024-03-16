@@ -1,4 +1,6 @@
 import { Highlighter } from "./highlighter.ts";
+import { MenuItemType } from "./index.ts";
+import { MenuItem } from "./index.ts";
 import { ThemeManager } from "./theme.ts";
 
 export class HighlighterNone extends Highlighter {
@@ -12,6 +14,19 @@ export class HighlighterNone extends Highlighter {
 
     parseLine(l: string): string {
         return l;
+    }
+
+    getMenuItems(file: string): MenuItem[] {
+        const sec = file.replaceAll('\n', '').split(' ');
+
+        const pieces: MenuItem[] = [];
+
+        for(let i=0;i<sec.length;i++) {
+            if(sec[i].trim() == '') continue;
+            pieces.push({ type: MenuItemType.Word, value: sec[i] });
+        }
+
+        return pieces;
     }
 }
 
@@ -95,6 +110,19 @@ export class HighlighterSV extends Highlighter {
         }
 
         pieces.push(t);
+
+        return pieces;
+    }
+
+    getMenuItems(file: string): MenuItem[] {
+        const sec = file.replaceAll('\n', '').split(' ');
+
+        const pieces: MenuItem[] = [];
+
+        for(let i=0;i<sec.length;i++) {
+            if(sec[i].trim() == '') continue;
+            pieces.push({ type: MenuItemType.Word, value: sec[i] });
+        }
 
         return pieces;
     }
