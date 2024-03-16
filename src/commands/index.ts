@@ -298,20 +298,49 @@ export class CommandManager {
             }
         });
 
-        this.register('vset', { name: 'vset', description: 'Set an editor variable', usage: 'vset <id: string> <value: string>' }, async(_args, _editor)=>{
+        this.register('vset', { name: 'vset', description: 'Set an editor variable', usage: 'vset <id: string> <value: string>' }, async(args, editor)=>{
+            if(!args[0]) {
+                editor.spawnError('Requires a variable ID');
+                return;
+            } else if(!args[1]) {
+                editor.spawnError('Requires a value');
+                return;
+            }
 
+            switch(args[0]) {
+                case 'home':
+                    editor.spawnError('"home" is a readonly variable!');
+                break;
+
+                default:
+                    if(isNaN(parseInt(args[1]))) {
+                        editor.setVariable(args[0], args[1]);
+                    } else {
+                        editor.setVariable(args[0], parseInt(args[1]));
+                    }
+                break;
+            }
         });
 
         this.register('vget', { name: 'vget', description: 'Get and create a popup containing an editor variable', usage: 'vget <id: string>' }, async(args, editor)=>{
             if(!args[0]) {
-                editor.spawnError('Requires a variable value ID');
-                await editor.render();
+                editor.spawnError('Requires a variable ID');
                 return;
             }
 
-            if(!editor.getVariable(args[0])) {
-                editor.spawnError(`Unknown variable: "${args[0]}"`);
-                await editor.render();
+            if(editor.getVariable(args[0]) != null) {
+                editor.spawnPopup(editor.getVariable(args[0]));
+                return;
+                
+            }
+
+            switch(args[0]) {
+                case 'home':
+                    editor.spawnPopup(editor.home);
+                break;
+
+                default:
+                    editor.spawnPopup(`Unknown variable: "${args[0]}"`);
                 return;
             }
         });

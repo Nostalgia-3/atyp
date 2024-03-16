@@ -22,8 +22,6 @@ function home_dir(): string | null {
     return null;
 }
 
-const home = home_dir();
-
 function ansiRegex({onlyFirst = false} = {}) {
     const pattern = [
         '[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]+)*|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]*)*)?\\u0007)',
@@ -204,6 +202,8 @@ export class Editor {
 
     command: TextBuffer;    // Command buffer
 
+    home: string;
+
     constructor() {
         this.buffers = [];
         this.config = { drawLines: false, listenBell: false, tab: 4 };
@@ -211,17 +211,25 @@ export class Editor {
         this.cm = new CommandManager(this);
         this.tm = new ThemeManager(this);
 
+        if(home_dir() == null) {
+            console.error(`Couldn't get a home directory!`);
+            Deno.exit(1);
+        }
+
+        this.home = home_dir() as string;
+
         this.hls = [];
 
         // Load some base ones by default
         this.hls.push(new HighlighterNone(this.tm));
         this.hls.push(new HighlighterSV(this.tm));
 
-        this.loadConfig();
-        this.loadThemes();
-
         this.command = new TextBuffer(this);
         this.console = new TextBuffer(this);
+
+        this.loadConfig();
+        this.loadThemes();
+        this.loadVariables();
 
         this.buffers.push(new TextBuffer(this));
         this.acBuf = 0;
@@ -476,37 +484,39 @@ export class Editor {
 
     protected loadThemes() {
         // Default theme
-        if(!existsSync(home+'/atyp/themes/', { isDirectory: true })) {
-            Deno.mkdirSync(home+'/atyp/themes');
+        if(!existsSync(this.home+'/atyp/themes/', { isDirectory: true })) {
+            this.log(`[!] No themes folder - Making one`);
+            Deno.mkdirSync(this.home+'/atyp/themes');
         }
 
-        if(!existsSync(home+'/atyp/themes/default.json', { isFile: true })) {
-            Deno.writeFileSync(home+'/atyp/themes/default.json', new TextEncoder().encode(JSON.stringify(DEFAULT_THEME)));
+        if(!existsSync(this.home+'/atyp/themes/default.json', { isFile: true })) {
+            this.log(`[!] No default theme - Making one`);
+            Deno.writeFileSync(this.home+'/atyp/themes/default.json', new TextEncoder().encode(JSON.stringify(DEFAULT_THEME)));
         }
 
-        const files = Deno.readDirSync(home+'/atyp/themes/');
+        const files = Deno.readDirSync(this.home+'/atyp/themes/');
 
         const decoder = new TextDecoder();
 
         for(const file of files) {
             if(!file.isFile) continue;
 
-            try { JSON.parse(decoder.decode(Deno.readFileSync(`${home}/atyp/themes/${file.name}`))) }
+            try { JSON.parse(decoder.decode(Deno.readFileSync(`${this.home}/atyp/themes/${file.name}`))) }
             catch { continue; }
 
-            this.tm.load(decoder.decode(Deno.readFileSync(`${home}/atyp/themes/${file.name}`)));
+            this.tm.load(decoder.decode(Deno.readFileSync(`${this.home}/atyp/themes/${file.name}`)));
         }
     }
 
     protected loadConfig() {
-        if(!existsSync(home+'/atyp/', {isDirectory: true})) {
-            console.error('No atyp folder - Making one');
-            Deno.mkdirSync(home+'/atyp/');
+        if(!existsSync(this.home+'/atyp/', {isDirectory: true})) {
+            this.log(`[!] No atyp folder - Making one`);
+            Deno.mkdirSync(this.home+'/atyp/');
         }
         
-        if(!existsSync(home+'/atyp/config.json')) {
-            console.error('No config file - Making one');
-            Deno.writeFileSync(home+'/atyp/config.json', new TextEncoder().encode(JSON.stringify({
+        if(!existsSync(this.home+'/atyp/config.json')) {
+            this.log(`[!] No config file - Making one`);
+            Deno.writeFileSync(this.home+'/atyp/config.json', new TextEncoder().encode(JSON.stringify({
                 drawLines: false,
                 listenBell: true,
                 tab: 4
@@ -514,14 +524,28 @@ export class Editor {
         }
 
         try {
-            this.config = JSON.parse(new TextDecoder().decode(Deno.readFileSync(home + '/atyp/config.json')));
+            this.config = JSON.parse(new TextDecoder().decode(Deno.readFileSync(this.home + '/atyp/config.json')));
         } catch {
             this.config = { drawLines: false, listenBell: false, tab: 4 };
         }
     }
 
+    protected loadVariables() {
+        if(!existsSync(this.home+'/atyp/var.json')) {
+            this.log(`[!] No variable file - Making one`);
+            Deno.writeFileSync(this.home+'/atyp/var.json', new TextEncoder().encode(JSON.stringify({})));
+        }
+    }
+
+    setVariable(name: string, value: string|number) {
+        const vars = JSON.parse(new TextDecoder().decode(Deno.readFileSync(this.home+'/atyp/var.json')));
+        vars[name] = value;
+        Deno.writeFileSync(this.home+'/atyp/var.json', new TextEncoder().encode(JSON.stringify(vars)));
+    }
+
     getVariable(v: string) {
-        return null;
+        const vars = JSON.parse(new TextDecoder().decode(Deno.readFileSync(this.home+'/atyp/var.json')));
+        return vars[v];
     }
 
     stripAnsi(s: string): string { return s.replaceAll(ansiRegex(), ''); }
@@ -691,6 +715,11 @@ export class Editor {
         await showCursor();
         console.clear();
         Deno.exit(code);
+    }
+
+    spawnPopup(msg: string) {
+        this.popupText = msg;
+        this.showPopup();
     }
 
     spawnError(msg: string) {
