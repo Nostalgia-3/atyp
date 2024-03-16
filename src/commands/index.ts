@@ -297,6 +297,24 @@ export class CommandManager {
                 editor.spawnError(`${e}`);
             }
         });
+
+        this.register('vset', { name: 'vset', description: 'Set an editor variable', usage: 'vset <id: string> <value: string>' }, async(_args, _editor)=>{
+
+        });
+
+        this.register('vget', { name: 'vget', description: 'Get and create a popup containing an editor variable', usage: 'vget <id: string>' }, async(args, editor)=>{
+            if(!args[0]) {
+                editor.spawnError('Requires a variable value ID');
+                await editor.render();
+                return;
+            }
+
+            if(!editor.getVariable(args[0])) {
+                editor.spawnError(`Unknown variable: "${args[0]}"`);
+                await editor.render();
+                return;
+            }
+        });
     }
 
     register(name: string, help: Help, onRun: (args: string[], editor: Editor)=>Promise<void>) {

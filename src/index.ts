@@ -33,6 +33,17 @@ function ansiRegex({onlyFirst = false} = {}) {
     return new RegExp(pattern, onlyFirst ? undefined : 'g');
 }
 
+// Methods:    \uea8c
+// Variables:  \uea88
+// Fields:     \ueb5f
+// Classes:    \ueb5b
+// Interfaces: \ueb61
+// Enums:      \uea95
+// Words:      \uea93
+
+export enum MenuItemType { Method, Variable, Field, Class, Interface, Enum, Word };
+export type MenuItem = { type: MenuItemType, value: string };
+
 export enum Mode {
     NORMAL='N',
     COMMAND='C',
@@ -82,12 +93,20 @@ export class TextBuffer {
     }
 
     left() {
+        if(this.editor.renderMenu) {
+            this.editor.renderMenu = false;
+        }
+        
         const lines = this.buffer.split('\n');
         if((this.cursor.x)>0) { this.cursor.x--; this.cursor.c--; }
         else if(lines[this.cursor.y+this.offset-1] != null) { this.cursor.y--; this.cursor.x = lines[this.cursor.y+this.offset].length; this.cursor.c--; }
     }
 
     right() {
+        if(this.editor.renderMenu) {
+            this.editor.renderMenu = false;
+        }
+
         const lines = this.buffer.split('\n');
         const cLine = lines[this.cursor.y+this.offset];
         if(this.cursor.x < cLine.length) { this.cursor.x++; this.cursor.c++; }
@@ -108,7 +127,7 @@ export class TextBuffer {
 
             if(lines[this.cursor.y+this.offset][this.cursor.x] == null) {
                 this.cursor.x = lines[this.cursor.y+this.offset].length;
-                this.cursor.c = this.getLinesBefore(lines, this.cursor.y+this.offset);
+                this.cursor.c = this.getLinesBefore(lines, this.cursor.y+this.offset)+this.cursor.x;
             } else {
                 this.cursor.c = this.getLinesBefore(lines, this.cursor.y+this.offset)+this.cursor.x;
             }
@@ -137,7 +156,7 @@ export class TextBuffer {
                 this.cursor.x = lines[this.cursor.y+this.offset].length;
                 this.cursor.c = this.getLinesBefore(lines, this.cursor.y+this.offset)+lines[this.cursor.y+this.offset].length;
             } else {
-                this.cursor.c = this.getLinesBefore(lines, this.cursor.y+this.offset);
+                this.cursor.c = this.getLinesBefore(lines, this.cursor.y+this.offset)+lines[this.cursor.y+this.offset].length-1;
             }
         } else {
             this.editor.bell();
@@ -174,7 +193,8 @@ export class Editor {
     
     renderMenu = false;         // Whether or not the menu should be rendered
     selectedMenuItem: number;   // The selected menu item
-    
+    menuItems: MenuItem[];      // A list of menu items
+
     // acHL: Highlighter;          // Active highlighter
     hls: Highlighter[];         // List of Highlighters
 
@@ -207,6 +227,15 @@ export class Editor {
         this.acBuf = 0;
 
         this.selectedMenuItem = 0;
+        this.menuItems = [
+            { type: MenuItemType.Class,     value: 'class' },
+            { type: MenuItemType.Enum,      value: 'enum' },
+            { type: MenuItemType.Field,     value: 'field' },
+            { type: MenuItemType.Interface, value: 'interface' },
+            { type: MenuItemType.Method,    value: 'method' },
+            { type: MenuItemType.Variable,  value: 'variable' },
+            { type: MenuItemType.Word,      value: 'word' },
+        ];
 
         this.buffers[0].acHL = new HighlighterNone(this.tm);
 
@@ -272,6 +301,11 @@ export class Editor {
         curBuf.right();
     }
 
+    menuSelect() {
+        this.writeToBuf(this.menuItems[this.selectedMenuItem].value);
+        
+    }
+
     menuUp() {
         if(this.selectedMenuItem > 0) {
             this.selectedMenuItem--;
@@ -279,7 +313,9 @@ export class Editor {
     }
 
     menuDown() {
-
+        if(this.selectedMenuItem < this.menuItems.length) {
+            this.selectedMenuItem++;
+        }
     }
 
     protected async clear(background: number[]) {
@@ -293,6 +329,8 @@ export class Editor {
         writeAllSync(Deno.stdout, new TextEncoder().encode(t));
     }
 
+    // This method sucks, and I need to make it somewhat decent (but it's not that
+    // important so I'll do it later)
     protected async drawPopup() {
         const termSize = Deno.consoleSize();
 
@@ -380,15 +418,17 @@ export class Editor {
 
     protected async drawMenu() {
         const termSize = Deno.consoleSize();
-        const menuHeight = 10;
         const menuWidth = 20;
 
         const cursor = this.buffers[this.acBuf].getCursor();
 
-        if(cursor.y+menuHeight < termSize.rows-2) { // Draw down
-            for(let i=0;i<menuHeight;i++) {
+        const icons = [ '\uea8c', '\uea88', '\ueb5f', '\ueb5b', '\ueb61', '\uea95', '\uea93' ];
+        const names = [ 'method', 'variable', 'field', 'classe', 'interface', 'enum', 'word' ];
+
+        if(cursor.y+this.menuItems.length < termSize.rows-2) { // Draw down
+            for(let i=0;i<this.menuItems.length;i++) {
                 await goTo(cursor.x+4, cursor.y+i+2);
-                const menuLine = ` ${this.col(this.tm.get('menu_bar_object'), true)}\uea8c${this.col(this.tm.get('foreground'), true)} hello`;
+                const menuLine = ` ${this.col(this.tm.get('menu_bar_' + names[this.menuItems[i].type]), true)}${icons[this.menuItems[i].type]}${this.col(this.tm.get('foreground'), true)} ${this.menuItems[i].value}`;
                 const highlight = ((i == this.selectedMenuItem) ? this.col(this.tm.get('menu_bar_selected')) : '');
                 writeAllSync(Deno.stdout, new TextEncoder().encode(this.col(this.tm.get('menu_bar_back')) + highlight + this.col(this.tm.get('foreground'),true) + menuLine + this.makeWhitespace(menuWidth-this.stripAnsi(menuLine).length) + this.col(this.tm.get('menu_bar_back'))));
             }
@@ -478,6 +518,10 @@ export class Editor {
         } catch {
             this.config = { drawLines: false, listenBell: false, tab: 4 };
         }
+    }
+
+    getVariable(v: string) {
+        return null;
     }
 
     stripAnsi(s: string): string { return s.replaceAll(ansiRegex(), ''); }
@@ -608,29 +652,38 @@ export class Editor {
         const cursor = acBuf.getCursor();
         const buffer = acBuf.getBuf();
 
+        // return value
+        let rv = false;
+
         if(inCommand) {
             this.command.setBuf(this.command.getBuf().slice(0, this.command.cursor.x-1));
             this.command.cursor.x--;
             return;
         }
-    
+
         acBuf.setHasBufSaved(false);
 
         const lines = buffer.split('\n');
     
-        if(buffer[cursor.c-1] == null) {
-            return;
-        }
+        if(buffer[cursor.c-1] == null) return;
 
         if(buffer[cursor.c-1] == '\n') {
             cursor.y--;
             cursor.x=lines[cursor.y].length;
+
+            rv = true;
         } else {
             cursor.x--;
         }
 
+        if(buffer[cursor.c-1] == ' ') {
+            rv = true;
+        }
+
         acBuf.setBuf(buffer.slice(0, cursor.c-1).concat(buffer.slice(cursor.c)));
         cursor.c--;
+
+        return rv;
     }
 
     async exit(code = 0) {
@@ -767,13 +820,18 @@ for await (const keypress of readKeypress()) {
             case 'up':      activeBuf.up();       break;
             case 'down':    activeBuf.down();     break;
 
+            case 'pageup':
+            case 'pagedown':
+            case 'home':
+            case 'insert':
             case 'end':
-
             break;
 
-            case 'backspace':
-                editor.removeChar();
-            break;
+            case 'backspace': {
+                const rv = editor.removeChar();
+
+                if(editor.renderMenu && rv) editor.renderMenu = false;
+            break; }
 
             case 'delete':
                 if(editor.buffers[editor.acBuf].getBuf().length >= 1) { editor.removeCharForward(); } else editor.bell();
@@ -786,6 +844,11 @@ for await (const keypress of readKeypress()) {
             break; }
 
             case 'return':
+                if(editor.renderMenu) {
+                    editor.menuSelect();
+                    editor.renderMenu = false;
+                    break;
+                }
                 editor.writeToBuf('\n');
                 editor.buffers[editor.acBuf].hasSaved = false;
             break;
@@ -831,8 +894,8 @@ for await (const keypress of readKeypress()) {
                 editor.mode = Mode.NORMAL;
             break;
 
-            case 'space': await editor.writeToBuf(' ', true); break;
-            default: await editor.writeToBuf(keypress.key, true); break;
+            case 'space': editor.writeToBuf(' ', true); break;
+            default: editor.writeToBuf(keypress.key, true); break;
         }
     } else if(editor.mode == Mode.POPUP) {
         editor.closePopup();
