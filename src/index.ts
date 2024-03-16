@@ -431,7 +431,7 @@ export class Editor {
         const cursor = this.buffers[this.acBuf].getCursor();
 
         const icons = [ '\uea8c', '\uea88', '\ueb5f', '\ueb5b', '\ueb61', '\uea95', '\uea93' ];
-        const names = [ 'method', 'variable', 'field', 'classe', 'interface', 'enum', 'word' ];
+        const names = [ 'method', 'variable', 'field', 'class', 'interface', 'enum', 'word' ];
 
         if(cursor.y+this.menuItems.length < termSize.rows-2) { // Draw down
             for(let i=0;i<this.menuItems.length;i++) {
