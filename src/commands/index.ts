@@ -51,20 +51,25 @@ export class CommandManager {
     init() {
         this.register('q', { name: 'q', description: 'Closes the editor if all buffers are saved', usage: 'q' }, async(args: string[], editor: Editor) => {
             const curBuf = editor.buffers[editor.acBuf];
-    
+
+            if(curBuf.hasSaved) {
+                await editor.exit();
+            }
+
             if(args[0]) {
                 editor.buffers[editor.acBuf].file = args[0];
     
                 Deno.writeFileSync(args[0], new TextEncoder().encode(curBuf.getBuf()));
                 curBuf.hasSaved = true;
+                await editor.exit();
             } else if(!args[0] && !editor.buffers[editor.acBuf].file) {
-                editor.spawnError(`(W)rite required at least one argument. Provided 0.`);
+                editor.spawnError(`Cannot save that buffer as it is not associated with any file.`);
                 return;
             } else {
                 Deno.writeFileSync(editor.buffers[editor.acBuf].file as string, new TextEncoder().encode(curBuf.getBuf()));
                 curBuf.hasSaved = true;
                 editor.mode = Mode.NORMAL;
-                return;
+                await editor.exit();
             }
     
             editor.mode = Mode.NORMAL;
@@ -336,7 +341,7 @@ export class CommandManager {
 
             switch(args[0]) {
                 case 'home':
-                    editor.spawnPopup(editor.home);
+                    editor.spawnPopup(editor.home.replaceAll('\\', '/') + '/atyp/');
                 break;
 
                 default:

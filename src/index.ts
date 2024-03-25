@@ -1,12 +1,12 @@
 import { goTo, showCursor, hideCursor } from "https://denopkg.com/iamnathanj/cursor@v2.2.0/mod.ts";
-import { writeAll, writeAllSync } from "https://deno.land/std@0.216.0/io/write_all.ts";
+import { writeAllSync, writeAll } from 'https://deno.land/std@0.216.0/io/write_all.ts';
 import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
 import { existsSync } from "https://deno.land/std@0.216.0/fs/mod.ts";
 import { equal } from 'https://deno.land/x/equal@v1.5.0/mod.ts';
 import { CommandManager } from './commands/index.ts';
 import { HighlighterNone, HighlighterSV } from "./builtin.ts";
 import { Highlighter } from './highlighter.ts';
-import { DEFAULT_THEME, ThemeManager } from './theme.ts'
+import { DEFAULT_THEME, ThemeManager } from './theme.ts';
 
 export const linkRegex = /^{.+}$/g;
 
@@ -193,7 +193,6 @@ export class Editor {
     selectedMenuItem: number;   // The selected menu item
     menuItems: MenuItem[];      // A list of menu items
 
-    // acHL: Highlighter;          // Active highlighter
     hls: Highlighter[];         // List of Highlighters
 
     console: TextBuffer;    // Buffer for logging
@@ -235,6 +234,7 @@ export class Editor {
         this.acBuf = 0;
 
         this.selectedMenuItem = 0;
+        // Simple little table for testing
         this.menuItems = [
             { type: MenuItemType.Class,     value: 'class' },
             { type: MenuItemType.Enum,      value: 'enum' },
@@ -402,15 +402,48 @@ export class Editor {
                 if(this.mode == Mode.SELECT) {
                     if(curBuf.cursor.sel_y == i) {
                         const xOff = curBuf.cursor.x-curBuf.cursor.sel_x;
-
+                        
                         this.console.unsafeSetBuf(this.console.getBuf() + `xOff = ${xOff}\n`);
 
                         if(xOff < 0) { // Going left
-                            line = line.substring(0, curBuf.cursor.sel_x+xOff) + this.col(this.tm.get('sel_back')) + line.substring(curBuf.cursor.sel_x+xOff, curBuf.cursor.sel_x) + selectedLine + line.substring(curBuf.cursor.sel_x);
+                            line =
+                                line.substring(0, curBuf.cursor.sel_x+xOff) +
+                                this.col(this.tm.get('sel_back')) +
+                                line.substring(curBuf.cursor.sel_x+xOff, curBuf.cursor.sel_x) +
+                                selectedLine +
+                                line.substring(curBuf.cursor.sel_x)
+                            ;
                         } else { // Going right
-                            line = line.substring(0, curBuf.cursor.sel_x) + this.col(this.tm.get('sel_back')) + line.substring(curBuf.cursor.sel_x, curBuf.cursor.sel_x+xOff) + selectedLine + line.substring(curBuf.cursor.sel_x+xOff);
+                            line =
+                                line.substring(0, curBuf.cursor.sel_x) +
+                                this.col(this.tm.get('sel_back')) +
+                                line.substring(curBuf.cursor.sel_x, curBuf.cursor.sel_x+xOff) +
+                                selectedLine +
+                                line.substring(curBuf.cursor.sel_x+xOff);
                         }
                     } else {
+                        if(curBuf.cursor.sel_y < i) {
+                            line = this.col(this.tm.get('sel_back')) + line + this.col(this.tm.get('background'));
+                        } else {
+                            const xOff = curBuf.cursor.x-curBuf.cursor.sel_x;
+                            
+                            if(xOff < 0) { // Going left
+                                line =
+                                    line.substring(0, curBuf.cursor.sel_x+xOff) +
+                                    this.col(this.tm.get('sel_back')) +
+                                    line.substring(curBuf.cursor.sel_x+xOff, curBuf.cursor.sel_x) +
+                                    selectedLine +
+                                    line.substring(curBuf.cursor.sel_x)
+                                ;
+                            } else { // Going right
+                                line =
+                                    line.substring(0, curBuf.cursor.sel_x) +
+                                    this.col(this.tm.get('sel_back')) +
+                                    line.substring(curBuf.cursor.sel_x, curBuf.cursor.sel_x+xOff) +
+                                    selectedLine +
+                                    line.substring(curBuf.cursor.sel_x+xOff);
+                            }
+                        }
                         // I hate this.
                     }
                 }
