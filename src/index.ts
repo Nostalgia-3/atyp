@@ -1,55 +1,13 @@
-import { goTo, showCursor, hideCursor } from "https://denopkg.com/iamnathanj/cursor@v2.2.0/mod.ts";
-import { writeAllSync, writeAll } from 'https://deno.land/std@0.216.0/io/write_all.ts';
-import { readKeypress } from "https://deno.land/x/keypress@0.0.11/mod.ts";
-import { existsSync } from "https://deno.land/std@0.216.0/fs/mod.ts";
-import { equal } from 'https://deno.land/x/equal@v1.5.0/mod.ts';
-import { CommandManager } from './commands/index.ts';
-import { HighlighterNone, HighlighterSV } from "./builtin.ts";
-import { Highlighter } from './highlighter.ts';
-import { DEFAULT_THEME, ThemeManager } from './theme.ts';
+// This file is basically a remake of the core bits of atyp,
+// because I did a lot of stuff in a way that makes it hard to
+// do now
 
-export const linkRegex = /^{.+}$/g;
-
-// Taken from https://deno.land/x/dir
-function home_dir(): string | null {
-    switch (Deno.build.os) {
-      case "linux":
-      case "darwin":
-        return Deno.env.get("HOME") ?? null;
-      case "windows":
-        return Deno.env.get("USERPROFILE") ?? null;
-    }
-    return null;
-}
-
-function ansiRegex({onlyFirst = false} = {}) {
-    const pattern = [
-        '[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]+)*|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]*)*)?\\u0007)',
-        '(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-nq-uy=><~]))'
-    ].join('|');
-
-    return new RegExp(pattern, onlyFirst ? undefined : 'g');
-}
-
-// Methods:    \uea8c
-// Variables:  \uea88
-// Fields:     \ueb5f
-// Classes:    \ueb5b
-// Interfaces: \ueb61
-// Enums:      \uea95
-// Words:      \uea93
-
-export enum MenuItemType { Method, Variable, Field, Class, Interface, Enum, Word };
-export type MenuItem = { type: MenuItemType, value: string };
-
-export enum Mode {
-    NORMAL='N',
-    COMMAND='C',
-    INSERT='I',
-    POPUP='P',
-    SELECT='S',
-    DOCS='D'
-}
+import { Keypress, readKeypress } from 'https://deno.land/x/keypress@0.0.11/mod.ts';
+import { Renderer } from './renderer.ts';
+import { Theme, ThemeObject } from './theme.ts';
+import * as utils from './utils.ts';
+import { existsSync } from 'https://deno.land/std@0.216.0/fs/exists.ts';
+import { DEFAULT_THEME } from './default.ts';
 
 export class TextBuffer {
     file?: string;
@@ -58,10 +16,10 @@ export class TextBuffer {
     offset = 0;
     canWrite: boolean;
     hasSaved = true;
-    acHL: Highlighter;
+    crlf = false;
 
     cursor = {
-        x: 0, y: 0, c: 0,
+        c: 0,
 
         sel_start: 0,
         sel_x: 0,
@@ -72,946 +30,674 @@ export class TextBuffer {
         this.editor = e;
         this.canWrite = canWrite;
         this.file = file;
-        this.acHL = new HighlighterNone(this.editor.tm);
+        this.crlf = false;
     }
 
-    getBuf() { return this.buffer; }
+    getBuf() { if(this.crlf) return this.buffer.replaceAll('\n', '\r\n'); return this.buffer; }
     getOffset() { return this.offset; }
     getCursor() { return this.cursor; }
 
-    setBuf(buf: string) { if(!this.canWrite) return; this.buffer = buf; }
+    setBuf(buf: string, crlf: boolean = false) {
+        if(!this.canWrite) return;
+        this.buffer = buf.replaceAll('\r', '');
+        this.crlf = crlf;
+    }
     unsafeSetBuf(buf: string) { this.buffer = buf; }
     setHasBufSaved(b: boolean) { this.hasSaved = b; }
 
-    getLinesBefore(lines: string[], i: number) {
-        const l = lines.slice(0, i);
-        let s = '';
-        for(let i=0;i<l.length;i++) { s += l[i]; }
-        return s.length+l.length; // +l.length for counting newlines
-    }
-
-    left() {
-        if(this.editor.renderMenu) {
-            this.editor.renderMenu = false;
-        }
-        
-        const lines = this.buffer.split('\n');
-        if((this.cursor.x)>0) { this.cursor.x--; this.cursor.c--; }
-        else if(lines[this.cursor.y+this.offset-1] != null) { this.cursor.y--; this.cursor.x = lines[this.cursor.y+this.offset].length; this.cursor.c--; }
-    }
-
-    right() {
-        if(this.editor.renderMenu) {
-            this.editor.renderMenu = false;
-        }
-
-        const lines = this.buffer.split('\n');
-        const cLine = lines[this.cursor.y+this.offset];
-        if(this.cursor.x < cLine.length) { this.cursor.x++; this.cursor.c++; }
-        else if(lines[this.cursor.y+this.offset+1] != null) { this.cursor.x=0;this.cursor.y++;this.cursor.c++; }
-    }
-
-    up() {
-        const lines = this.buffer.split('\n');
-
-        if(this.editor.renderMenu) {
-            this.editor.menuUp();
-            return;
-        }
-
-        if(lines[this.cursor.y + this.offset - 1] != null) {
-            if(this.cursor.y == 0 && this.offset > 0) this.offset--;
-            else this.cursor.y--;
-
-            if(lines[this.cursor.y+this.offset][this.cursor.x] == null) {
-                this.cursor.x = lines[this.cursor.y+this.offset].length;
-                this.cursor.c = this.getLinesBefore(lines, this.cursor.y+this.offset)+this.cursor.x;
-            } else {
-                this.cursor.c = this.getLinesBefore(lines, this.cursor.y+this.offset)+this.cursor.x;
-            }
-        } else {
-            this.editor.bell();
-        }
-    }
-
-    down() {
-        const termSize = Deno.consoleSize();
-        const lines = this.buffer.split('\n');
-
-        if(this.editor.renderMenu) {
-            this.editor.menuDown();
-            return;
-        }
-
-        if(lines[this.cursor.y+this.offset+1] != null) {
-            if(this.cursor.y == termSize.rows-4) {
-                this.offset++;
-            } else {
-                this.cursor.y++;
-            }
-
-            if(lines[this.cursor.y+this.offset][this.cursor.x] == null) {
-                this.cursor.x = lines[this.cursor.y+this.offset].length;
-                this.cursor.c = this.getLinesBefore(lines, this.cursor.y+this.offset)+lines[this.cursor.y+this.offset].length;
-            } else {
-                this.cursor.c = this.getLinesBefore(lines, this.cursor.y+this.offset)+lines[this.cursor.y+this.offset].length-1;
-            }
-        } else {
-            this.editor.bell();
-        }
-    }
-
-    moveCursor(x: number, y: number) {
-        const termSize = Deno.consoleSize();
-        if(termSize.rows-1 >= y) {
-            this.cursor.y = y;
-            this.offset = 0;
-            this.cursor.c = this.getLinesBefore(this.buffer.split('\n'), this.cursor.y);
-        } else {
-            this.cursor.c = this.getLinesBefore(this.buffer.split('\n'), this.cursor.y+this.offset);
-            this.cursor.y = 0;
-            this.offset = y;
-        }
-
-        this.cursor.x = x;
-    }
-}
-
-export class Editor {
-    config: { drawLines: boolean, listenBell: boolean, tab: number };
-
-    mode = Mode.NORMAL;         // Mode for input
-    debugMessage = '';          // Debug message shown on the info bar
-    
-    cm: CommandManager;         // Command manager
-    tm: ThemeManager;           // Theme manager
-
-    popupText = '';             // Text for popup
-    popupVisible = false;       // Whether or not the popup is visible
-    
-    renderMenu = false;         // Whether or not the menu should be rendered
-    selectedMenuItem: number;   // The selected menu item
-    menuItems: MenuItem[];      // A list of menu items
-
-    hls: Highlighter[];         // List of Highlighters
-
-    console: TextBuffer;    // Buffer for logging
-    buffers: TextBuffer[];  // List of buffers
-    acBuf: number;          // Pointer to active buffer in buffers
-
-    command: TextBuffer;    // Command buffer
-
-    home: string;
-
-    constructor() {
-        this.buffers = [];
-        this.config = { drawLines: false, listenBell: false, tab: 4 };
-
-        this.cm = new CommandManager(this);
-        this.tm = new ThemeManager(this);
-
-        if(home_dir() == null) {
-            console.error(`Couldn't get a home directory!`);
-            Deno.exit(1);
-        }
-
-        this.home = home_dir() as string;
-
-        this.hls = [];
-
-        // Load some base ones by default
-        this.hls.push(new HighlighterNone(this.tm));
-        this.hls.push(new HighlighterSV(this.tm));
-
-        this.command = new TextBuffer(this);
-        this.console = new TextBuffer(this);
-
-        this.loadConfig();
-        this.loadThemes();
-        this.loadVariables();
-
-        this.buffers.push(new TextBuffer(this));
-        this.acBuf = 0;
-
-        this.selectedMenuItem = 0;
-        // Simple little table for testing
-        this.menuItems = [
-            { type: MenuItemType.Class,     value: 'class' },
-            { type: MenuItemType.Enum,      value: 'enum' },
-            { type: MenuItemType.Field,     value: 'field' },
-            { type: MenuItemType.Interface, value: 'interface' },
-            { type: MenuItemType.Method,    value: 'method' },
-            { type: MenuItemType.Variable,  value: 'variable' },
-            { type: MenuItemType.Word,      value: 'word' },
-        ];
-
-        this.buffers[0].acHL = new HighlighterNone(this.tm);
-
-        this.cm.init();
-    }
-
-    // Handle pressing return in doc
-    docReturn() {
-        const curBuf = this.buffers[this.acBuf];
-
-        // Get all of the "links," AKA {link}
-
-        const locations = this.findLinkLocations(curBuf.getBuf());
-
-        for(let i=0;i<locations.length;i++) {
-            if(locations[i].pos[1] == curBuf.cursor.y && curBuf.cursor.x >= locations[i].pos[0] && curBuf.cursor.x <= locations[i].pos[0]+locations[i].len) {
-                this.console.unsafeSetBuf(this.console.getBuf()+locations[i].location+'\n');
-            }
-        }
-    }
-
-    findLinkLocations(file: string) {
-        const sections = file.split('\n');
-
-        const links: { location: string, pos: number[], len: number }[] = [];
-
-        console.clear();
-
-        for(let i=0;i<sections.length;i++) {
-            const pieces = sections[i].split(' ');
-            for(let x=0;x<pieces.length;x++) {
-                const matches = pieces[x].match(linkRegex);
-
-                if(matches == null) continue;
-
-                links.push({ location: matches[0].substring(1, matches[0].length-1), pos: [pieces.slice(0, x).join(' ').length, i], len: matches[0].length });
-            }
-        }
-
-        return links;
-    }
-
-    select() {
-        this.mode = Mode.SELECT;
-        const curBuf = this.buffers[this.acBuf];
-
-        const { x, y, c } = curBuf.getCursor();
-
-        curBuf.cursor.sel_start = c;
-        curBuf.cursor.sel_x = x;
-        curBuf.cursor.sel_y = y+curBuf.getOffset();
-    }
-
-    selectLeft() {
-        const curBuf = this.buffers[this.acBuf];
-
-        curBuf.left();
-    }
-    
-    selectRight() {
-        const curBuf = this.buffers[this.acBuf];
-
-        curBuf.right();
-    }
-
-    // This isn't how I want it to work. Figure it out
-    menuSelect() {
-        this.writeToBuf(this.menuItems[this.selectedMenuItem].value);
-    }
-
-    menuUp() {
-        if(this.selectedMenuItem > 0) {
-            this.selectedMenuItem--;
-        }
-    }
-
-    menuDown() {
-        if(this.selectedMenuItem < this.menuItems.length) {
-            this.selectedMenuItem++;
-        }
-    }
-
-    protected async clear(background: number[]) {
-        let t = this.col(background);
-        const termSize = Deno.consoleSize();
-        for(let i=0;i<termSize.columns*termSize.rows;i++) {
-            t += ' ';
-        }
-
-        await goTo(0, 0);
-        writeAllSync(Deno.stdout, new TextEncoder().encode(t));
-    }
-
-    // This method sucks, and I need to make it somewhat decent (but it's not that
-    // important so I'll do it later)
-    protected async drawPopup() {
-        const termSize = Deno.consoleSize();
-
-        const width = this.popupText.length+4;
-        const height = 5;
-
-        let x = 0;
-        let y = 0;
-
-        let top = '';
-        let mid = '';
-        let bot = '';
-
-        for(let i=0;i<width;i++) {
-            if(i == 0) { top+='┌'; mid+= '│'; bot+= '└'; }
-            else if(i == width-1) { top+='┐'; mid+= '│'; bot+='┘';}
-            else { top+='─'; bot+='─'; mid+=' '; }
-        }
-
-        x = Math.floor(termSize.columns/2);
-        y = Math.floor(termSize.rows/2);
-
-        const w = Math.floor(width/2);
-        const h = Math.floor(height/2);
-
-        await goTo(x-w, y-h);
-        await writeAll(Deno.stdout, new TextEncoder().encode(top));
-        await goTo(x-w, y-h+1);
-        await writeAll(Deno.stdout, new TextEncoder().encode(mid));
-        await goTo(x-Math.floor((this.popupText.length+4)/2), y);
-        await writeAll(Deno.stdout, new TextEncoder().encode('│ ' + this.popupText + ' │'));
-        await goTo(x-w, y-h+3);
-        await writeAll(Deno.stdout, new TextEncoder().encode(mid));
-        await goTo(x-w, y-h+4);
-        await writeAll(Deno.stdout, new TextEncoder().encode(bot));
-    }
-
-    protected async drawBuffer(hl: Highlighter) {
-        await goTo(0, 0);
-    
-        const termSize = Deno.consoleSize();
-
-        const buffer = this.buffers[this.acBuf].getBuf();
-        const offset = this.buffers[this.acBuf].getOffset();
-
-        const curBuf = this.buffers[this.acBuf];
-
-        const lines = buffer.split('\n');
-
-        let renderedLines = 0;
-
-        for(let i=offset;i<termSize.rows+offset-2;i++) {
-            if(i-offset >= termSize.rows-2) break;
-
-            const lineNum = (this.config.drawLines ? (this.col(this.tm.get('line_num'),true) + this.getLineNum(i+1, lines) + ' ' + this.col(this.tm.get('foreground'),true)) : '');
-            const selectedLine = ((i == (curBuf.getCursor().y+offset)) ? this.col(this.tm.get('selected_line')) : this.col(this.tm.get('background')));
-
-            if(lines[i] != undefined) {
-                let line = lines[i].substring(0, termSize.columns-this.stripAnsi(lineNum).length);
-
-                if(this.mode == Mode.SELECT) {
-                    if(curBuf.cursor.sel_y == i) {
-                        const xOff = curBuf.cursor.x-curBuf.cursor.sel_x;
-                        
-                        this.console.unsafeSetBuf(this.console.getBuf() + `xOff = ${xOff}\n`);
-
-                        if(xOff < 0) { // Going left
-                            line =
-                                line.substring(0, curBuf.cursor.sel_x+xOff) +
-                                this.col(this.tm.get('sel_back')) +
-                                line.substring(curBuf.cursor.sel_x+xOff, curBuf.cursor.sel_x) +
-                                selectedLine +
-                                line.substring(curBuf.cursor.sel_x)
-                            ;
-                        } else { // Going right
-                            line =
-                                line.substring(0, curBuf.cursor.sel_x) +
-                                this.col(this.tm.get('sel_back')) +
-                                line.substring(curBuf.cursor.sel_x, curBuf.cursor.sel_x+xOff) +
-                                selectedLine +
-                                line.substring(curBuf.cursor.sel_x+xOff);
-                        }
-                    } else {
-                        if(curBuf.cursor.sel_y < i) {
-                            line = this.col(this.tm.get('sel_back')) + line + this.col(this.tm.get('background'));
-                        } else {
-                            const xOff = curBuf.cursor.x-curBuf.cursor.sel_x;
-                            
-                            if(xOff < 0) { // Going left
-                                line =
-                                    line.substring(0, curBuf.cursor.sel_x+xOff) +
-                                    this.col(this.tm.get('sel_back')) +
-                                    line.substring(curBuf.cursor.sel_x+xOff, curBuf.cursor.sel_x) +
-                                    selectedLine +
-                                    line.substring(curBuf.cursor.sel_x)
-                                ;
-                            } else { // Going right
-                                line =
-                                    line.substring(0, curBuf.cursor.sel_x) +
-                                    this.col(this.tm.get('sel_back')) +
-                                    line.substring(curBuf.cursor.sel_x, curBuf.cursor.sel_x+xOff) +
-                                    selectedLine +
-                                    line.substring(curBuf.cursor.sel_x+xOff);
-                            }
-                        }
-                        // I hate this.
-                    }
-                }
-
-                writeAllSync(Deno.stdout, new TextEncoder().encode(selectedLine + lineNum + hl.parseLine(line) + this.makeWhitespace(termSize.columns - this.stripAnsi(lineNum).length - lines[i].length) + this.col(this.tm.get('background')) + '\n'));
-            } else {
-                writeAllSync(Deno.stdout, new TextEncoder().encode(this.makeWhitespace(this.stripAnsi(lineNum).length) + this.col(this.tm.get('tilda_empty'), true) + '~' + '\n'));
-            }
-
-            renderedLines++;
-        }
-    }
-
-    protected async drawMenu() {
-        const termSize = Deno.consoleSize();
-        const menuWidth = 20;
-
-        const cursor = this.buffers[this.acBuf].getCursor();
-
-        const icons = [ '\uea8c', '\uea88', '\ueb5f', '\ueb5b', '\ueb61', '\uea95', '\uea93' ];
-        const names = [ 'method', 'variable', 'field', 'class', 'interface', 'enum', 'word' ];
-
-        if(cursor.y+this.menuItems.length < termSize.rows-2) { // Draw down
-            for(let i=0;i<this.menuItems.length;i++) {
-                if(!this.menuItems[i] || !this.menuItems[i].type) {
-                    this.log(`[!] ${this.menuItems[i]} doesn't have a type!`);
-                    continue;
-                }
-
-                await goTo(cursor.x+4, cursor.y+i+2);
-                const menuLine = ` ${this.col(this.tm.get('menu_bar_' + names[this.menuItems[i].type]), true)}${icons[this.menuItems[i].type]}${this.col(this.tm.get('foreground'), true)} ${this.menuItems[i].value}`;
-                const highlight = ((i == this.selectedMenuItem) ? this.col(this.tm.get('menu_bar_selected')) : '');
-                writeAllSync(Deno.stdout, new TextEncoder().encode(this.col(this.tm.get('menu_bar_back')) + highlight + this.col(this.tm.get('foreground'),true) + menuLine + this.makeWhitespace(menuWidth-this.stripAnsi(menuLine).length) + this.col(this.tm.get('menu_bar_back'))));
-            }
-        }
-    }
-
-    makeWhitespace(amount: number) {
-        let s = '';
-        for(let i=0;i<amount;i++) s+=' ';
-        return s;
-    }
-
-    protected async drawInfoBar(message: string, mRight: string, background: number[]) {
-        let t: string = this.col(background);
-        const termSize = Deno.consoleSize();
-    
-        t += message;
-
-        for(let i=message.replace(ansiRegex(), '').length;i<termSize.columns-mRight.replace(ansiRegex(), '').length;i++) {
-            t+=' ';
-        }
-
-        t += mRight;
-    
-        await goTo(0, termSize.rows-1);
-        writeAllSync(Deno.stdout, new TextEncoder().encode(t));
-    }
-
-    protected async drawCommandBar(msg: string) {
-        if(this.mode != Mode.COMMAND) return;
-
-        let t: string = this.col(this.tm.get('background'));
-        const termSize = Deno.consoleSize();
-    
-        t += ':';
-    
-        for(let i=1;i<termSize.columns;i++) {
-            if(msg[i-1])  t+=msg[i-1];
-            else          t+=' ';
-        }
-    
-        await goTo(0, termSize.rows);
-        writeAllSync(Deno.stdout, new TextEncoder().encode(t));
-    }
-
-    protected loadThemes() {
-        // Default theme
-        if(!existsSync(this.home+'/atyp/themes/', { isDirectory: true })) {
-            this.log(`[!] No themes folder - Making one`);
-            Deno.mkdirSync(this.home+'/atyp/themes');
-        }
-
-        if(!existsSync(this.home+'/atyp/themes/default.json', { isFile: true })) {
-            this.log(`[!] No default theme - Making one`);
-            Deno.writeFileSync(this.home+'/atyp/themes/default.json', new TextEncoder().encode(JSON.stringify(DEFAULT_THEME)));
-        }
-
-        const files = Deno.readDirSync(this.home+'/atyp/themes/');
-
-        const decoder = new TextDecoder();
-
-        for(const file of files) {
-            if(!file.isFile) continue;
-
-            try { JSON.parse(decoder.decode(Deno.readFileSync(`${this.home}/atyp/themes/${file.name}`))) }
-            catch { continue; }
-
-            this.tm.load(decoder.decode(Deno.readFileSync(`${this.home}/atyp/themes/${file.name}`)));
-        }
-    }
-
-    protected loadConfig() {
-        if(!existsSync(this.home+'/atyp/', {isDirectory: true})) {
-            this.log(`[!] No atyp folder - Making one`);
-            Deno.mkdirSync(this.home+'/atyp/');
-        }
-        
-        if(!existsSync(this.home+'/atyp/config.json')) {
-            this.log(`[!] No config file - Making one`);
-            Deno.writeFileSync(this.home+'/atyp/config.json', new TextEncoder().encode(JSON.stringify({
-                drawLines: false,
-                listenBell: true,
-                tab: 4
-            })));
-        }
-
-        try {
-            this.config = JSON.parse(new TextDecoder().decode(Deno.readFileSync(this.home + '/atyp/config.json')));
-        } catch {
-            this.config = { drawLines: false, listenBell: false, tab: 4 };
-        }
-    }
-
-    protected loadVariables() {
-        if(!existsSync(this.home+'/atyp/var.json')) {
-            this.log(`[!] No variable file - Making one`);
-            Deno.writeFileSync(this.home+'/atyp/var.json', new TextEncoder().encode(JSON.stringify({})));
-        }
-    }
-
-    setVariable(name: string, value: string|number) {
-        const vars = JSON.parse(new TextDecoder().decode(Deno.readFileSync(this.home+'/atyp/var.json')));
-        vars[name] = value;
-        Deno.writeFileSync(this.home+'/atyp/var.json', new TextEncoder().encode(JSON.stringify(vars)));
-    }
-
-    getVariable(v: string) {
-        const vars = JSON.parse(new TextDecoder().decode(Deno.readFileSync(this.home+'/atyp/var.json')));
-        return vars[v];
-    }
-
-    stripAnsi(s: string): string { return s.replaceAll(ansiRegex(), ''); }
-
-    showPopup() { this.mode = Mode.POPUP; this.popupVisible = true; }
-    closePopup() { this.mode = Mode.NORMAL; this.popupVisible = false; }
-
-    async render() {
-        const c = Deno.consoleSize();
-
-        const curBuf = this.buffers[this.acBuf];
-        const buffer = this.buffers[this.acBuf].getBuf();
-        const cursor = this.buffers[this.acBuf].getCursor();
-        const offset = this.buffers[this.acBuf].getOffset();
-
-        const lines = buffer.split('\n');
-
-        const mode = `${this.col(this.tm.get('mode_color'),true)}${this.mode}${this.col(this.tm.get('foreground'),true)}`;
-        const cursorPos = `${cursor.x+1}:${cursor.y+offset+1}`;
-        const amount = `${this.col(this.tm.get('tab_count'),true)}${this.config.tab}${this.col(this.tm.get('foreground'),true)}`;
-
-        // Make tab string
-        let tabs = ``;
-
-        for(let i=0;i<this.buffers.length;i++) {
-            const fi = this.buffers[i].file;
-
-            if(fi == null) {
-                tabs += `${this.makeTabString('---', i)}${this.col(this.tm.get('info_bar_back'))}`;
-            } else {
-                tabs += `${this.makeTabString(fi as string, i)}${this.col(this.tm.get('info_bar_back'))}`;
-            }
-        }
-
-        await hideCursor();
-
-        await this.clear(this.tm.get('background'));
-        await this.drawBuffer(curBuf.acHL);
-        await this.drawInfoBar(`${mode} ${curBuf.canWrite ? '':'(RO) '} ${this.col(this.tm.get('info_bar_front'),true)}${this.debugMessage} ${tabs}`, `${curBuf.acHL.info.name} ${cursorPos} ${curBuf.cursor.c} ${amount}`, this.tm.get('info_bar_back'));
-        await this.drawCommandBar(this.command.getBuf());
-        if(this.renderMenu) {
-            this.menuItems = curBuf.acHL.getMenuItems(buffer);
-
-            if(this.menuItems.length == 0) {
-                this.renderMenu = false;
-                this.bell();
-            } else await this.drawMenu();
-        }
-        
-        if(this.mode == Mode.POPUP) await this.drawPopup();
-        
-        if(this.mode == Mode.COMMAND) {
-            const comCursor = this.command.getCursor();
-            await goTo(comCursor.x+2, c.rows);
-        } else {
-            await goTo(cursor.x+1+((this.config.drawLines) ? (this.getLineNum(0, lines).length+1) : 0), (cursor.y>0)?(cursor.y+1):(cursor.y));
-        }
-
-        await showCursor();
-
-        // Change cursor depending on what you're doing
-        // @TODO make this a configurable item
-        if(this.mode == Mode.NORMAL) {
-            writeAllSync(Deno.stdout, new TextEncoder().encode('\x1b[\x31 q'));
-        } else {
-            writeAllSync(Deno.stdout, new TextEncoder().encode('\x1b[\x35 q'));
-        }
-    }
-
-    writeToBuf(text: string, inCommand = false) {
-        if(inCommand) {
-            const comCursor = this.command.getCursor();
-            const b = this.command.getBuf().slice(0, comCursor.x);
-            const e = this.command.getBuf().slice(comCursor.x);
-            this.command.setBuf(b + text + e);
-            comCursor.x++;
-            return;
-        }
-
-        const activeBuf = this.buffers[this.acBuf];
-
-        if(!activeBuf.canWrite) {
-            this.bell();
+    write(s: string) {
+        if(!this.canWrite) {
+            utils.bell();
             
             return;
         }
 
-        activeBuf.setHasBufSaved(false);
-        const cursor = activeBuf.getCursor();
-        const buffer = activeBuf.getBuf();
+        this.setHasBufSaved(false);
+        const cursor = this.getCursor();
+        const buffer = this.getBuf();
 
-        const b = buffer.slice(0, cursor.c);
-        const e = buffer.slice(cursor.c);
-        activeBuf.setBuf(b + text + e);
-        
-        const termSize = Deno.consoleSize();
+        const b = buffer.slice(0, this.cursor.c);
+        const e = buffer.slice(this.cursor.c);
+        this.buffer = b + s + e;
 
-        if(text == '\n') {
-            if(cursor.y > termSize.rows-4) {
-                activeBuf.offset++;
-            } else {
-                cursor.y++;
-            }
-
-            cursor.c++; cursor.x=0;
-        } else {
-            cursor.x+=text.length; cursor.c+=text.length;
-        }
+        cursor.c+=s.length;
     }
 
-    removeCharForward(inCommand = false) {
-        const acBuf  = this.buffers[this.acBuf];
-        const cursor = acBuf.getCursor();
-        const buffer = acBuf.getBuf();
-
-        if(inCommand) {
-            if(!this.command.getBuf()[this.command.cursor.x]) return;
-            this.command.setBuf(buffer.slice(0, this.command.cursor.x).concat(buffer.slice(this.command.cursor.x+1)));
-        }
-
-        if(!acBuf.canWrite) {
-            editor.bell();
-            return;
-        }
-        
-        if(!buffer[cursor.c]) return;
-    
-        acBuf.setHasBufSaved(false);
-
-        acBuf.setBuf(buffer.slice(0, cursor.c).concat(buffer.slice(cursor.c+1)));
-    }
-
-    removeChar(inCommand = false) {
-        const acBuf  = this.buffers[this.acBuf];
-        const cursor = acBuf.getCursor();
-        const buffer = acBuf.getBuf();
+    delete() {
+        const buffer = this.getBuf();
 
         // return value
-        let rv = false;
+        this.setHasBufSaved(false);
 
-        if(inCommand) {
-            this.command.setBuf(this.command.getBuf().slice(0, this.command.cursor.x-1));
-            this.command.cursor.x--;
-            return;
+        if(buffer[this.cursor.c-1] == null) return;
+
+        this.setBuf(buffer.slice(0, this.cursor.c-1).concat(buffer.slice(this.cursor.c)));
+        this.cursor.c--;
+    }
+
+    getCursorPos() {
+        const lines = this.buffer.substring(0, this.cursor.c).replace('\r','').split('\n');
+        const x = (lines.at(-1) ?? '').length;
+        const y = lines.length - 1;
+
+        return { x, y };
+    }
+
+    getIndex(x: number, y: number) {
+        const lines = this.buffer.split('\n');
+
+        if(lines.length < y) {
+            utils.setAltBuffer(false);
+            console.error(`Attempted to get index at (${x}, ${y}), but the max index is (${(lines.at(-1) ?? '').length}, ${lines.length})`);
         }
 
-        acBuf.setHasBufSaved(false);
+        let c = x;
 
-        const lines = buffer.split('\n');
-    
-        if(buffer[cursor.c-1] == null) return;
+        for(let i=0;i<y;i++) {
+            c += lines[y].length;
+        }
 
-        if(buffer[cursor.c-1] == '\n') {
-            cursor.y--;
-            cursor.x=lines[cursor.y].length;
+        return c;
+    }
 
-            rv = true;
+    getLinesBefore(lines: string[], i: number) {
+        const l = lines.slice(0, i);
+        let s = '';
+        for(let i=0;i<l.length;i++) { s += l[i] + 1; }
+        return s.length+l.length; // +l.length for counting newlines
+    }
+
+    left(x: number = 1) {
+        for(let i=0;i<x;i++) {
+            if(this.cursor.c > 0) {
+                this.cursor.c--;
+                if(this.buffer[this.cursor.c] == '\r') this.cursor.c--;
+            } else {
+                utils.bell();
+                break;
+            }
+        }
+    }
+
+    right(x: number = 1) {
+
+        for(let i=0;i<x;i++) {
+            if(this.cursor.c < this.buffer.length) {
+                this.cursor.c++;
+                if(this.buffer[this.cursor.c] == '\r') this.cursor.c++;
+            } else {
+                utils.bell();
+                break;
+            }
+        }
+    }
+
+    up() {
+        const lines = this.buffer.split('\n');
+        const { x, y } = this.getCursorPos();
+
+        if(lines[y + this.offset] != null) {
+            if(x > lines[y + this.offset - 1].length) {
+                this.cursor.c -= x + 1;
+            } else {
+                this.cursor.c -= lines[y+this.offset - 1].length+1;
+            }
+
+            if(this.cursor.c < 0) {
+                this.cursor.c = 0;
+            }
         } else {
-            cursor.x--;
+            utils.bell();
+        }
+    }
+
+    down() {
+        const lines = this.buffer.split('\n');
+        const { x, y } = this.getCursorPos();
+
+        if(lines[y+this.offset] != null) {
+            // this.cursor.c += lines[y+this.offset].length+1;
+            
+            if(x > lines[y + this.offset + 1].length) {
+                this.cursor.c += lines[y + this.offset].length - x + lines[y + this.offset+1].length + 1;
+            } else {
+                this.cursor.c += lines[y+this.offset].length+1;
+            }
+
+            if(this.cursor.c > this.buffer.length) {
+                this.cursor.c = this.buffer.length;
+            }
+        } else {
+            utils.bell();
+        }
+    }
+
+    setCursor(x: number, y: number) {
+        const lines = this.buffer.split('\n');
+
+        this.cursor.c = 0;
+
+        for(let i=0;i<y-1;i++) {
+            if(lines[i] == undefined) break;
+            this.cursor.c += lines[i].length+1;
         }
 
-        if(buffer[cursor.c-1] == ' ') {
-            rv = true;
+        if(this.cursor.c < 0) {
+            this.cursor.c = 0;
         }
 
-        acBuf.setBuf(buffer.slice(0, cursor.c-1).concat(buffer.slice(cursor.c)));
-        cursor.c--;
+        this.cursor.c += Math.min(x, lines[y].length);
 
-        return rv;
+        if(this.cursor.c > this.buffer.length) {
+            this.cursor.c = this.buffer.length;
+        }
+        return true;
     }
+}
 
-    async exit(code = 0) {
-        writeAllSync(Deno.stdout, new TextEncoder().encode('\x1b[0m\x1b[\x35 q'));
-        await showCursor();
-        console.clear();
-        Deno.exit(code);
-    }
+type MouseButton = number;
 
-    spawnPopup(msg: string) {
-        this.popupText = msg;
-        this.showPopup();
-    }
+export enum Format {
+    NORMAL,
+    FLIPPED,
+    ZEN,
+    CUSTOM
+}
 
-    spawnError(msg: string) {
-        // create a popup that is on the middle of the screen
-        this.popupText = msg;
-        this.showPopup();
-        this.bell();
-    }
+export enum Mode {
+    NORMAL,
+    INSERT,
+    COMMAND
+}
 
-    runCommand(c: string) {
-        const cleanedString = c.trim();
-        const sections = cleanedString.split(' ');
+class Editor extends utils.TypedEventEmitter<{
+    click: [MouseButton, number, number, boolean],
+    scroll: [number, number, number],
+    keypress: [Keypress],
+    drag: [MouseButton, number, number, number, number]
+}> {
+    protected theme: Theme;
+    protected renderer: Renderer;
+    protected buffers: TextBuffer[];
+    protected activeBuffer: number;
+    protected command: TextBuffer;
 
+    protected mode: Mode;
+
+    protected dragX = 0;
+    protected dragY = 0;
+
+    layout: { format: Format, explorerWidth: number };
+    
+    constructor() {
+        super();
+        const { columns, rows } = Deno.consoleSize();
+        this.theme = new Theme(DEFAULT_THEME as ThemeObject);
+        this.renderer = new Renderer(columns, rows);
+        this.buffers = [];
+        this.layout = {
+            format: Format.NORMAL,
+            explorerWidth: 35
+        };
+        this.command = new TextBuffer(this);
         this.mode = Mode.NORMAL;
+        this.activeBuffer = 0;
+        this.new();
+    }
 
-        const ce = this.cm.run(sections[0], sections.slice(1));
+    public async start() {
+        utils.enableMouse();
+        utils.setAltBuffer(true);
 
-        if(!ce) {
-            this.bell();
+        let c = Deno.consoleSize();
+        setInterval(()=>{
+            const cur = Deno.consoleSize();
+            if(cur.columns != c.columns || cur.rows != c.rows) {
+                console.clear();
+                editor.render();
+                c = cur;
+            }
+        }, 100);
+
+        this.render();
+
+        for await(const keypress of readKeypress(Deno.stdin)) {
+            if(keypress.ctrlKey && keypress.key == 'c') {
+                this.exit();
+            }
+        
+            const d = keypress.unicode.split('\\u').map((v)=>parseInt('0x0'+v,16));
+            d.shift();
+        
+            if(d[0] == 0x1b && d[2] == 0x3C) {
+                const secs = String.fromCharCode(...d).split('<')[1].split(';');
+                const button = parseInt(secs[0]);
+                const x = parseInt(secs[1]);
+                const y = parseInt(secs[2].slice(0,-1));
+                const released = secs[2].includes('m');
+                if(button == 64)
+                    this.emit('scroll', -1, x, y);
+                else if(button == 65)
+                    this.emit('scroll', 1, x, y);
+                else
+                    this.emit('click', button, x, y, released);
+
+                if(released) {
+                    if(this.dragX != x || this.dragY != y) this.emit('drag', button, this.dragX, this.dragY, x, y);
+                } else {
+                    this.dragX = x;
+                    this.dragY = y;
+                }
+
+                continue;
+            }
+
+            this.emit('keypress', keypress);
+            if(this.mode == Mode.NORMAL) {
+                switch(keypress.key) {
+                    case 'i':
+                        this.mode = Mode.INSERT;
+                        break;
+                    case ':':
+                        this.mode = Mode.COMMAND;
+                        this.command.setBuf(':');
+                        this.command.setCursor(1, 0);
+                        break;
+
+                    case 'up': this.buffers[this.activeBuffer].up(); break;
+                    case 'down': this.buffers[this.activeBuffer].down(); break;
+                    case 'left':
+                        if(keypress.ctrlKey)
+                            this.layout.explorerWidth++;
+                        else
+                            this.buffers[this.activeBuffer].left();
+                        break;
+                    case 'right':
+                        if(keypress.ctrlKey)
+                            this.layout.explorerWidth--;
+                        else
+                            this.buffers[this.activeBuffer].right();
+                        break;
+
+                    default:
+                        utils.bell();
+                        break;
+                }
+            } else if(this.mode == Mode.INSERT) {
+                switch(keypress.key) {
+                    case 'space':
+                        this.write(' ');
+                        break;
+
+                    case 'backspace':
+                        this.delete();
+                        break;
+
+                    case 'return':
+                        this.write('\n');
+                        break;
+
+                    case 'escape':
+                        this.mode = Mode.NORMAL;
+                        break;
+
+                    case 'up': this.buffers[this.activeBuffer].up(); break;
+                    case 'down': this.buffers[this.activeBuffer].down(); break;
+                    case 'left':
+                        if(keypress.ctrlKey)
+                            this.layout.explorerWidth++;
+                        else
+                            this.buffers[this.activeBuffer].left();
+                        break;
+                    case 'right':
+                        if(keypress.ctrlKey)
+                            this.layout.explorerWidth--;
+                        else
+                            this.buffers[this.activeBuffer].right();
+                        break;
+
+                    default:
+                        this.write(keypress.key ?? 'undefined');
+                        break;
+                }
+            } else {
+                switch(keypress.key) {
+                    case 'escape':
+                        this.mode = Mode.NORMAL;
+                        break;
+                    case 'left':
+                        if(keypress.ctrlKey)
+                            this.layout.explorerWidth++;
+                        else
+                            this.command.left();
+                        break;
+                    case 'right':
+                        if(keypress.ctrlKey)
+                            this.layout.explorerWidth--;
+                        else
+                            this.command.right();
+                        break;
+                    case 'space':
+                        this.command.write(' ');
+                        break;
+                    case 'backspace':
+                        this.command.delete();
+                        if(this.command.getBuf().length == 0) {
+                            this.mode = Mode.NORMAL;
+                        }
+                        break;
+                    case 'return': {
+                        // parse and run command
+                        this.runCommand(this.command.getBuf());
+                        this.mode = Mode.NORMAL;
+                        break; }
+                    default:
+                        this.command.write(keypress.key ?? 'undefined');
+                        break;
+                }
+            }
+            this.render();
         }
     }
 
-    open(file: string) {
-        if(existsSync(file)) {
-            editor.buffers[editor.acBuf].file = file;
-            editor.buffers[editor.acBuf].setBuf(new TextDecoder().decode(Deno.readFileSync(editor.buffers[editor.acBuf].file as string)).replaceAll('\r',''));
-        } else {
-            editor.buffers[editor.acBuf].file = file;
+    render() {
+        const { columns: w, rows: h } = Deno.consoleSize();
+        this.renderer.size(w, h);
+
+        console.clear();
+        this.renderer.clear(this.theme.getElementRGB('background'));
+
+        const buf = this.buffers[this.activeBuffer];
+        const { x, y } = buf.getCursorPos();
+
+        // normal
+        switch(this.layout.format) {
+            case Format.NORMAL:
+                this.editor(0, 0, w-this.layout.explorerWidth, h-2, buf);
+                this.explorer(w-this.layout.explorerWidth, 0, this.layout.explorerWidth, h-2);
+                break;
+            case Format.FLIPPED:
+                this.editor(this.layout.explorerWidth, 0, w-this.layout.explorerWidth, h-2, buf);
+                this.explorer(0, 0, this.layout.explorerWidth, h-2);
+                break;
+            case Format.ZEN:
+                this.editor(0, 0, w, h-2, buf);
+                break;
+            case Format.CUSTOM: // implement a way to define custom formats
+                break;
+        }
+
+        if(this.layout.format != Format.CUSTOM) {
+            this.commandLine(0, h-2, w);
+            this.statusLine(0, h, w);
+        }
+        
+        this.renderer.flush();
+        switch(this.mode) {
+            case Mode.NORMAL:
+                utils.write(utils.cursorTo(x+6, Math.min(y+1, h-3))); // normal
+                utils.setCursor(utils.CursorShape.BLINKING_BLOCK);
+                break;
+            case Mode.INSERT:
+                utils.setCursor(utils.CursorShape.BLINKING_BAR);
+                utils.write(utils.cursorTo(x+6, Math.min(y+1, h-3))); // normal
+                break;
+            case Mode.COMMAND:
+                utils.setCursor(utils.CursorShape.BLINKING_BAR);
+                utils.write(utils.cursorTo(0+this.command.getCursorPos().x, h-2)); // command
+                break;
+        }
+
+        utils.showCursor();
+    }
+
+    public runCommand(s: string) {
+        if(!s.startsWith(':')) return;
+
+        const args: string[] = [];
+        let carg = '';
+        let inString = false;
+
+        for(let i=0;i<s.length;i++) {
+            switch(s[i]) {
+                case '"':
+                    if(inString) {
+                        args.push(carg + '"');
+                        carg = '';
+                        inString = false;
+                    } else {
+                        if(carg != '') args.push(carg);
+                        carg = '"';
+                        inString = true;
+                    }
+                break;
+
+                case ' ':
+                    if(inString) carg += ' ';
+                    else {
+                        if(carg != '') args.push(carg);
+                        carg = '';
+                    }
+                break;
+
+                default:
+                    carg += s[i];
+                break;
+            }
+        }
+        if(carg != '') args.push(carg);
+
+        switch(args[0].substring(1)) {
+            case 'q!':
+                this.exit();
+            break;
+
+            case 'wq':
+                if(!this.save(args[1])) break;
+                if(!this.buffers[this.activeBuffer].hasSaved) {
+                    this.command.setBuf(`Error: No write since last change!`);
+                    break;
+                }
+                this.exit();
+            break;
+
+            case 'w':
+                this.save(args[1])
+            break;
+                
+            case 'q': {
+                if(!this.buffers[this.activeBuffer].hasSaved) {
+                    this.command.setBuf(`Error: No write since last change!`);
+                    break;
+                }
+                this.exit();
+            break; }
+
+            default:
+                this.command.setBuf(`Unknown command "${args[0].substring(1)}"`);
+            break;
         }
     }
 
-    log(v: string) {
-        this.console.setBuf(this.console.getBuf() + v + '\n');
+    public new(readonly = false) {
+        const buf = new TextBuffer(this, `[Buffer ${this.buffers.length+1}]`, !readonly);
+        this.buffers.push(buf);
+        this.activeBuffer = this.buffers.length-1;
     }
 
-    bell() {
-        if(this.config.listenBell) writeAllSync(Deno.stdout, new TextEncoder().encode('\x07'));
-    }
-
-    col(c: number[], front = false) {
-        return `\x1b[${front?'38':'48'};2;${c[0]};${c[1]};${c[2]}m`;
-    }
-
-    underline() { return `\x1b[4m`; }
-    noUnderline() { return `\x1b[24m`; }
-
-    getLineNum(l: number, lines: string[]) {
-        let len = 1;
-
-        if(lines.length != 0) {
-            len = lines.length.toString().padStart(2, ' ').length;
+    public open(file: string, readonly = false) {
+        if(!existsSync(file)) {
+            return false;
         }
-    
-        return l.toString().padStart(len, ' ');
+
+        const buf = new TextBuffer(this, file, !readonly);
+        const f = Deno.readTextFileSync(file);
+        buf.setBuf(f, f.includes('\r'));
+        this.buffers.push(buf);
+        this.activeBuffer = this.buffers.length-1;
+        return true;
     }
 
-    // Opens a cool little menu for stuff
-    openMenu() {
-        this.renderMenu = true;
+    public save(file?: string, setWrittenFlag = true) {
+        const buf = this.buffers[this.activeBuffer];
+        if(file != undefined) buf.file = file;
+
+        if(buf.file == undefined) {
+            this.command.setBuf('Error: No file name');
+            return false;
+        }
+
+        try {
+            Deno.writeTextFileSync(buf.file, buf.getBuf());
+        } catch(e) {
+            this.command.setBuf(`Error: Failed writing to file (${(e as Error).message})`);
+            return false;
+        }
+
+        buf.setHasBufSaved(setWrittenFlag);
+        return true;
     }
 
-    makeTabString(fn: string, i: number) {
-        const back = (i == this.acBuf) ? 'tab_back_selected' : 'tab_back';
-        return `${this.col(this.tm.get(back))} (${i}) ${fn}${this.makeWhitespace(10-fn.length)} ${this.col(this.tm.get('info_bar_back'))}`;
+    public setCursorPos(x: number, y: number) { this.buffers[this.activeBuffer].setCursor(x, y); }
+    public write(s: string) { this.buffers[this.activeBuffer].write(s); }
+    public delete() { this.buffers[this.activeBuffer].delete(); }
+
+    public exit() {
+        utils.disableMouse();
+        utils.setAltBuffer(false); // go back to buffer #0
+        Deno.exit(0);
+    }
+
+    /**
+     * Draws a text editor
+     * @param x The x position of the editor
+     * @param y The y position of the editor
+     * @param w The width of the editor
+     * @param h The height of the editor
+     * @param buf The buffer to ddraw
+     */
+    protected editor(x: number, y: number, w: number, h: number, buf: TextBuffer) {
+        this.renderer.box(x, y, w, h, 'Editor', this.theme.getElementRGB('editor_bg'));
+        const lines = buf.getBuf().split('\n');
+        for(let i=0;i<h-3;i++) {
+            if(i > h-3) break;
+            if(lines[i] != undefined) {
+                if(buf.getCursorPos().y == i) {
+                    this.renderer.rect(x+1,1+i, w-2, 1, this.theme.getElementRGB('selected_line'));
+                    this.renderer.text(x+1, 1+i, `${(i+1).toString().padStart(4)}`, this.theme.getElementRGB('selected_line_num'));
+                } else
+                    this.renderer.text(x+1, 1+i, `${(i+1).toString().padStart(4)}`, this.theme.getElementRGB('line_num'));
+                this.renderer.text(x+6, 1+i, lines[i].substring(0,w-7), this.theme.getElementRGB('unknown'));
+            } else {
+                this.renderer.text(x+6, 1+i, `~`, this.theme.getElementRGB('tilda_empty'));
+            }
+        }
+    }
+
+    protected explorer(x: number, y: number, w: number, h: number) {
+        this.renderer.box(x, y, w, h, 'Explorer', this.theme.getElementRGB('explorer_bg'));
+        this.renderer.text(x+2,y+1, 'Open Buffers', this.theme.getElementRGB('explorer_title'), undefined, {});
+        for(let i=0;i<this.buffers.length;i++) {
+            let fgc = this.theme.getElementRGB('explorer_fg');
+            if(i == this.activeBuffer)
+                fgc = this.theme.getElementRGB('explorer_active_fg');
+            const ts = this.buffers[i].file ?? 'Unknown';
+            this.renderer.text(x+5, y+2+i, ts, fgc);
+            if(!this.buffers[i].hasSaved)
+                this.renderer.text(x+3, y+2+i, '\uf111', this.theme.getColor(['lyellow','lyellow']));
+        }
+    }
+
+    protected statusLine(x: number, y: number, w: number) {
+        this.renderer.rect(x, y, w, 1, this.theme.getElementRGB('info_bar_bg'));
+        const acBuf = this.buffers[this.activeBuffer];
+        const c = acBuf.getCursorPos();
+
+        const chevies: { st: string, fg: utils.Gradient, bg: utils.Gradient }[] = [
+            {
+                st: 'NORMAL',
+                fg: this.theme.getElementRGB('mode_normal_fg'),
+                bg: this.theme.getElementRGB('mode_normal_bg')
+            },
+            {
+                st: `Ln ${c.y}, Col ${c.x}`,
+                fg: this.theme.getElementRGB('white'),
+                bg: this.theme.getElementRGB('chevy_1')
+            }
+        ];
+
+        switch(this.mode) {
+            case Mode.NORMAL: break;
+            case Mode.INSERT:
+                chevies[0].st = 'INSERT';
+                chevies[0].fg = this.theme.getElementRGB('mode_insert_fg');
+                chevies[0].bg = this.theme.getElementRGB('mode_insert_bg');
+                break;
+            case Mode.COMMAND:
+                chevies[0].st = 'COMMAND';
+                chevies[0].fg = this.theme.getElementRGB('mode_command_fg');
+                chevies[0].bg = this.theme.getElementRGB('mode_command_bg');
+                break;
+        }
+
+        for(let i=0;i<chevies.length;i++) {
+            x += this.calcChevy(chevies[i].st);
+        }
+
+        chevies.reverse();
+        for(let i=0;i<chevies.length;i++) {
+            x -= this.calcChevy(chevies[i].st);
+            this.chevy(x, y, ((i == 0) ? ' ' : '') + chevies[i].st, chevies[i].fg, chevies[i].bg);
+        }
+    }
+
+    protected commandLine(x: number, y: number, w: number) {
+        this.renderer.rect(x, y, w, 1, this.theme.getElementRGB('command_bg'));
+        this.renderer.text(x, y, this.command.getBuf().slice(0,w), this.theme.getElementRGB('command_fg'));
+    }
+
+    protected calcChevy(s: string) {
+        return s.length+2;
+    }
+
+    protected chevy(x: number, y: number, s: string, fg?: utils.Gradient, bg?: utils.Gradient) {
+        const bgc = this.renderer.getBG(x+s.length+2, y);
+        this.renderer.rect(x, y, s.length+3, 1, bg);
+        this.renderer.text(
+            x, y, ` ${s} `,
+            fg, bg
+        );
+        this.renderer.text(
+            x+s.length+2, y, '\ue0b0',
+            utils.grad(this.renderer.getBG(x+s.length+1, y)),
+            utils.grad(bgc),
+            // utils.grad(this.renderer.getFG(x+s.length+2, y)),
+        )
+
+        return s.length+3;
     }
 }
 
 const editor = new Editor();
 
-// This is probably not great but since apparently
-// there's no process.stdout.on('resize') equivalent
-// on Deno, I guess I have to do this
-let oldSize = Deno.consoleSize();
+utils.setTitle('Atyp');
 
-setInterval(async() => {
-    const newSize = Deno.consoleSize();
+editor.on('click', (mouse, x, y, released) => {
+    const { columns: w, rows: h } = Deno.consoleSize();
 
-    if(!equal(oldSize, newSize)) {
-        console.clear();
-        writeAllSync(Deno.stdout, new TextEncoder().encode(`\x1b[3J`));
-        await editor.render();
-    }
-
-    oldSize = newSize;
-}, 100);
-
-if(Deno.args[0]) { editor.open(Deno.args[0]); }
-
-await editor.render();
-
-for await (const keypress of readKeypress()) {
-    if (keypress.ctrlKey && keypress.key === 'c') await editor.exit();
-    if(!keypress.key) {
-        Deno.exit();
-    }
-
-    const activeBuf = editor.buffers[editor.acBuf];
-
-    if(editor.mode == Mode.NORMAL) {
-        switch(keypress.key) {
-            case 'i':
-                editor.mode = Mode.INSERT;
-            break;
-
-            case 'd':
-                editor.mode = Mode.DOCS;
-            break;
-
-            case 's':
-                editor.select();
-            break;
-
-            case ':':
-                editor.mode = Mode.COMMAND;
-            break;
-
-            case 'left':    activeBuf.left();     break;
-            case 'right':   activeBuf.right();    break;
-            case 'up':      activeBuf.up();       break;
-            case 'down':    activeBuf.down();     break;
-            default:        editor.bell();        break;
-        }
-    } else if(editor.mode == Mode.INSERT) {
-        switch(keypress.key) {
-            case 'left':    activeBuf.left();     break;
-            case 'right':   activeBuf.right();    break;
-            case 'up':      activeBuf.up();       break;
-            case 'down':    activeBuf.down();     break;
-
-            case 'pageup':
-            case 'pagedown':
-            case 'home':
-            case 'insert':
-            case 'end':
-            break;
-
-            case 'backspace': {
-                const rv = editor.removeChar();
-
-                if(editor.renderMenu && rv) editor.renderMenu = false;
-            break; }
-
-            case 'delete':
-                if(editor.buffers[editor.acBuf].getBuf().length >= 1) { editor.removeCharForward(); } else editor.bell();
-            break;
-
-            case 'tab': {
-                let s = '';
-                for(let i=0;i<editor.config.tab;i++) s+=' ';
-                editor.writeToBuf(s);
-            break; }
-
-            case 'return':
-                if(editor.renderMenu) {
-                    editor.menuSelect();
-                    editor.renderMenu = false;
-                    break;
-                }
-                editor.writeToBuf('\n');
-                editor.buffers[editor.acBuf].hasSaved = false;
-            break;
-
-            case 'escape':
-                if(editor.renderMenu) editor.renderMenu = false;
-                editor.mode = Mode.NORMAL;
-            break;
-
-            case '`':
-                if(keypress.ctrlKey) editor.openMenu();
-                else editor.writeToBuf('`');
-            break;
-
-            case '/':
-                editor.writeToBuf('/');
-            break;
-
-            case 'space':
-                if(editor.renderMenu) editor.renderMenu = false;
-                editor.writeToBuf(' ');
-            break;
-
-            default: editor.writeToBuf(keypress.key); break;
-        }
-    } else if(editor.mode == Mode.COMMAND) {
-        switch(keypress.key) {
-            case 'left': if(editor.command.cursor.x>0) { editor.command.cursor.x--; } break;
-            case 'right': { if(editor.command.cursor.c < editor.command.getBuf().length) { editor.command.cursor.x++; } break; }
-            case 'backspace': if(editor.command.getBuf().length >= 1) editor.removeChar(true); else editor.bell(); break;
-            case 'delete': if(editor.command.getBuf().length >= 1) { editor.removeCharForward(true); } else editor.bell(); break;
-
-            case 'up': break;
-            case 'down': break;
-
-            case 'return':
-                editor.runCommand(editor.command.getBuf());
-                editor.command.setBuf('');
-                editor.command.cursor.x=0;
-            break;
-
-            case 'escape':
-                editor.command.setBuf('');
-                editor.command.cursor.x=0;
-                editor.mode = Mode.NORMAL;
-            break;
-
-            case 'space': editor.writeToBuf(' ', true); break;
-            default: editor.writeToBuf(keypress.key, true); break;
-        }
-    } else if(editor.mode == Mode.POPUP) {
-        editor.closePopup();
-
-        if(keypress.key == ':') {
-            editor.mode = Mode.COMMAND;
-        }
-    } else if(editor.mode == Mode.SELECT) {
-        switch(keypress.key) {
-            case 'right': editor.selectRight(); break;
-            case 'left':  editor.selectLeft();  break;
-
-            case 'escape':
-                editor.mode = Mode.NORMAL;
-            break;
-
-            default:
-                editor.bell();
-            break;
-        }
-    } else if(editor.mode == Mode.DOCS) {
-        switch(keypress.key) {
-            case 'left':    activeBuf.left();     break;
-            case 'right':   activeBuf.right();    break;
-            case 'up':      activeBuf.up();       break;
-            case 'down':    activeBuf.down();     break;
-
-            case 'return':
-                editor.docReturn();
-            break;
-
-            case 'escape':
-                editor.mode = Mode.NORMAL;
-            break;
-
-            default:
-                editor.bell();
-            break;
+    if(mouse == 0 && released) {
+        if(x > w-editor.layout.explorerWidth && x <= w && y <= h-2) {
+            editor.write('explorer click');
+            editor.render();
+        } else if(x > 6 && x < w-editor.layout.explorerWidth && y > 1 && y < h-2) {
+            // const woe = w-editor.layout.explorerWidth-2;
+            // const hoe = w-editor.layout.explorerWidth-3;
+            // editor.setCursorPos(Math.min(x-7, woe), (y-2));
+            editor.render();
         }
     }
+});
 
-    await editor.render();
-}
+if(Deno.args[0]) editor.open(Deno.args[0]);
+
+editor.start();
