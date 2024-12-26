@@ -13,17 +13,13 @@ export class TextBuffer {
     file?: string;
     editor: Editor;
     protected buffer = '';
-    offset = 0;
     canWrite: boolean;
     hasSaved = true;
     crlf = false;
 
     cursor = {
         c: 0,
-
-        sel_start: 0,
-        sel_x: 0,
-        sel_y: 0
+        offset: 0
     };
 
     constructor(e: Editor, file?: string, canWrite = true) {
@@ -34,7 +30,6 @@ export class TextBuffer {
     }
 
     getBuf() { if(this.crlf) return this.buffer.replaceAll('\n', '\r\n'); return this.buffer; }
-    getOffset() { return this.offset; }
     getCursor() { return this.cursor; }
 
     setBuf(buf: string, crlf: boolean = false) {
@@ -83,21 +78,20 @@ export class TextBuffer {
         return { x, y };
     }
 
-    getIndex(x: number, y: number) {
-        const lines = this.buffer.split('\n');
+    startLine() {
+        const lines = this.buffer.split('\n')
+        
+        // lines we care about
+        const lwca = lines.slice(0, this.getCursorPos().y);
+        this.cursor.c = lwca.join('\n').length;
+    }
 
-        if(lines.length < y) {
-            utils.setAltBuffer(false);
-            console.error(`Attempted to get index at (${x}, ${y}), but the max index is (${(lines.at(-1) ?? '').length}, ${lines.length})`);
-        }
-
-        let c = x;
-
-        for(let i=0;i<y;i++) {
-            c += lines[y].length;
-        }
-
-        return c;
+    endLine() {
+        const lines = this.buffer.split('\n')
+        
+        // lines we care about
+        const lwca = lines.slice(0, this.getCursorPos().y+1);
+        this.cursor.c = lwca.join('\n').length;
     }
 
     getLinesBefore(lines: string[], i: number) {
@@ -136,11 +130,16 @@ export class TextBuffer {
         const lines = this.buffer.split('\n');
         const { x, y } = this.getCursorPos();
 
-        if(lines[y + this.offset] != null) {
-            if(x > lines[y + this.offset - 1].length) {
+        if(lines[y] != null) {
+            if(!lines[y - 1]) {
+                this.cursor.c = 0;
+                return;
+            }
+
+            if(lines[y - 1] && x > lines[y - 1].length) {
                 this.cursor.c -= x + 1;
             } else {
-                this.cursor.c -= lines[y+this.offset - 1].length+1;
+                this.cursor.c -= lines[y - 1].length+1;
             }
 
             if(this.cursor.c < 0) {
@@ -155,13 +154,11 @@ export class TextBuffer {
         const lines = this.buffer.split('\n');
         const { x, y } = this.getCursorPos();
 
-        if(lines[y+this.offset] != null) {
-            // this.cursor.c += lines[y+this.offset].length+1;
-            
-            if(x > lines[y + this.offset + 1].length) {
-                this.cursor.c += lines[y + this.offset].length - x + lines[y + this.offset+1].length + 1;
+        if(lines[y] != null) {            
+            if(lines[y + 1] && x > lines[y + 1].length) {
+                this.cursor.c += lines[y].length - x + lines[y+1].length + 1;
             } else {
-                this.cursor.c += lines[y+this.offset].length+1;
+                this.cursor.c += lines[y].length+1;
             }
 
             if(this.cursor.c > this.buffer.length) {
@@ -210,6 +207,11 @@ export enum Mode {
     COMMAND
 }
 
+export enum UIStyle {
+    BORDERLESS,
+    BORDERED
+}
+
 class Editor extends utils.TypedEventEmitter<{
     click: [MouseButton, number, number, boolean],
     scroll: [number, number, number],
@@ -227,7 +229,10 @@ class Editor extends utils.TypedEventEmitter<{
     protected dragX = 0;
     protected dragY = 0;
 
-    layout: { format: Format, explorerWidth: number };
+    layout: {
+        format: Format,
+        explorerWidth: number
+    };
     
     constructor() {
         super();
@@ -292,6 +297,8 @@ class Editor extends utils.TypedEventEmitter<{
                 continue;
             }
 
+            const acBuf = this.buffers[this.activeBuffer];
+
             this.emit('keypress', keypress);
             if(this.mode == Mode.NORMAL) {
                 switch(keypress.key) {
@@ -341,8 +348,26 @@ class Editor extends utils.TypedEventEmitter<{
                         this.mode = Mode.NORMAL;
                         break;
 
-                    case 'up': this.buffers[this.activeBuffer].up(); break;
-                    case 'down': this.buffers[this.activeBuffer].down(); break;
+                    case 'end':
+                        this.cursorEnd();
+                        break;
+
+                    case 'home':
+                        this.cursorStart();
+                        break;
+
+                    case 'up':
+                        acBuf.up();
+                        if(acBuf.getCursorPos().y - acBuf.cursor.offset < 0) {
+                            acBuf.cursor.offset--;
+                        }
+                    break;
+                    case 'down':
+                        acBuf.down();
+                        if(acBuf.getCursorPos().y > Deno.consoleSize().rows-5) {
+                            acBuf.cursor.offset++;
+                        }
+                    break;
                     case 'left':
                         if(keypress.ctrlKey)
                             this.layout.explorerWidth++;
@@ -360,8 +385,13 @@ class Editor extends utils.TypedEventEmitter<{
                         this.write(keypress.key ?? 'undefined');
                         break;
                 }
-            } else {
+            } else { // Mode.COMMAND
                 switch(keypress.key) {
+                    case 'up':
+                    case 'down':
+                        utils.bell();
+                    break;
+
                     case 'escape':
                         this.mode = Mode.NORMAL;
                         break;
@@ -400,9 +430,13 @@ class Editor extends utils.TypedEventEmitter<{
         }
     }
 
-    render() {
+    public render() {
         const { columns: w, rows: h } = Deno.consoleSize();
         this.renderer.size(w, h);
+
+        if(this.buffers[this.activeBuffer] == undefined) {
+            this.activeBuffer = 0;
+        }
 
         console.clear();
         this.renderer.clear(this.theme.getElementRGB('background'));
@@ -410,10 +444,15 @@ class Editor extends utils.TypedEventEmitter<{
         const buf = this.buffers[this.activeBuffer];
         const { x, y } = buf.getCursorPos();
 
+        if(this.layout.explorerWidth)
+
         // normal
         switch(this.layout.format) {
             case Format.NORMAL:
-                this.editor(0, 0, w-this.layout.explorerWidth, h-2, buf);
+                this.editor(
+                    0, 0,
+                    w-this.layout.explorerWidth, h-2, buf
+                );
                 this.explorer(w-this.layout.explorerWidth, 0, this.layout.explorerWidth, h-2);
                 break;
             case Format.FLIPPED:
@@ -435,12 +474,12 @@ class Editor extends utils.TypedEventEmitter<{
         this.renderer.flush();
         switch(this.mode) {
             case Mode.NORMAL:
-                utils.write(utils.cursorTo(x+6, Math.min(y+1, h-3))); // normal
+                utils.write(utils.cursorTo(x+6, Math.min(y+1, h-4))); // normal
                 utils.setCursor(utils.CursorShape.BLINKING_BLOCK);
                 break;
             case Mode.INSERT:
                 utils.setCursor(utils.CursorShape.BLINKING_BAR);
-                utils.write(utils.cursorTo(x+6, Math.min(y+1, h-3))); // normal
+                utils.write(utils.cursorTo(x+6, Math.min(y+1, h-4))); // normal
                 break;
             case Mode.COMMAND:
                 utils.setCursor(utils.CursorShape.BLINKING_BAR);
@@ -513,16 +552,45 @@ class Editor extends utils.TypedEventEmitter<{
                 this.exit();
             break; }
 
+            case 'b':
+                if(!args[1]) {
+                    this.command.setBuf(`Error: requires at least one argument`);
+                    break;
+                } else if(isNaN(parseInt(args[1]))) {
+                    this.command.setBuf(`Error: args #0 should be a number`);
+                    break;
+                }
+
+                this.setBuffer(parseInt(args[1])+1);
+            break;
+
+            case 'nb': this.new(true); break;
+
             default:
                 this.command.setBuf(`Unknown command "${args[0].substring(1)}"`);
             break;
         }
     }
 
-    public new(readonly = false) {
+    public setBuffer(x: number) {
+        if(this.buffers[x]) {
+            this.activeBuffer = x;
+        }
+    }
+
+    public deleteBuffer(x: number) {
+        if(this.buffers[x] != undefined && this.buffers[x].hasSaved) {
+            this.buffers.splice(x, 1);
+            this.setBuffer(x-1);
+        }
+    }
+
+    public new(active = false, readonly = false) {
         const buf = new TextBuffer(this, `[Buffer ${this.buffers.length+1}]`, !readonly);
         this.buffers.push(buf);
-        this.activeBuffer = this.buffers.length-1;
+        if(active) {
+            this.activeBuffer = this.buffers.length-1;
+        }
     }
 
     public open(file: string, readonly = false) {
@@ -558,6 +626,8 @@ class Editor extends utils.TypedEventEmitter<{
         return true;
     }
 
+    public cursorStart() { this.buffers[this.activeBuffer].startLine(); }
+    public cursorEnd() { this.buffers[this.activeBuffer].endLine(); }
     public setCursorPos(x: number, y: number) { this.buffers[this.activeBuffer].setCursor(x, y); }
     public write(s: string) { this.buffers[this.activeBuffer].write(s); }
     public delete() { this.buffers[this.activeBuffer].delete(); }
@@ -568,43 +638,41 @@ class Editor extends utils.TypedEventEmitter<{
         Deno.exit(0);
     }
 
-    /**
-     * Draws a text editor
-     * @param x The x position of the editor
-     * @param y The y position of the editor
-     * @param w The width of the editor
-     * @param h The height of the editor
-     * @param buf The buffer to ddraw
-     */
-    protected editor(x: number, y: number, w: number, h: number, buf: TextBuffer) {
-        this.renderer.box(x, y, w, h, 'Editor', this.theme.getElementRGB('editor_bg'));
+    protected editor(x: number, y: number, w: number, h: number, buf: TextBuffer, active = true, style = UIStyle.BORDERED) {
+        if(style == UIStyle.BORDERED)
+            this.renderer.box(x, y, w, h, `${buf.file ?? '[Unknown]'}`, this.theme.getElementRGB('editor_fg'));
+        else if(style == UIStyle.BORDERLESS)
+            this.renderer.rect(x, y, w, h, this.theme.getElementRGB('editor_bg'));
         const lines = buf.getBuf().split('\n');
-        for(let i=0;i<h-3;i++) {
+        for(let i=0;i<h-2;i++) {
             if(i > h-3) break;
             if(lines[i] != undefined) {
-                if(buf.getCursorPos().y == i) {
-                    this.renderer.rect(x+1,1+i, w-2, 1, this.theme.getElementRGB('selected_line'));
-                    this.renderer.text(x+1, 1+i, `${(i+1).toString().padStart(4)}`, this.theme.getElementRGB('selected_line_num'));
+                if(active && buf.getCursorPos().y == i) {
+                    this.renderer.rect(x+1,y+1+i, w-2, 1, this.theme.getElementRGB('selected_line'));
+                    this.renderer.text(x+1, y+1+i, `${(i+1).toString().padStart(4)}`, this.theme.getElementRGB('selected_line_num'));
                 } else
-                    this.renderer.text(x+1, 1+i, `${(i+1).toString().padStart(4)}`, this.theme.getElementRGB('line_num'));
-                this.renderer.text(x+6, 1+i, lines[i].substring(0,w-7), this.theme.getElementRGB('unknown'));
+                    this.renderer.text(x+1, y+1+i, `${(i+1).toString().padStart(4)}`, this.theme.getElementRGB('line_num'));
+                this.renderer.text(x+6, y+1+i, lines[i].substring(0,w-7), this.theme.getElementRGB('unknown'));
             } else {
-                this.renderer.text(x+6, 1+i, `~`, this.theme.getElementRGB('tilda_empty'));
+                this.renderer.text(x+6, y+1+i, `~`, this.theme.getElementRGB('tilda_empty'));
             }
         }
     }
 
     protected explorer(x: number, y: number, w: number, h: number) {
         this.renderer.box(x, y, w, h, 'Explorer', this.theme.getElementRGB('explorer_bg'));
-        this.renderer.text(x+2,y+1, 'Open Buffers', this.theme.getElementRGB('explorer_title'), undefined, {});
+        this.renderer.text(x+2,y+1, 'Open Buffers'.slice(0,w-5), this.theme.getElementRGB('explorer_title'), undefined, {});
         for(let i=0;i<this.buffers.length;i++) {
             let fgc = this.theme.getElementRGB('explorer_fg');
-            if(i == this.activeBuffer)
+            if(i == this.activeBuffer) {
                 fgc = this.theme.getElementRGB('explorer_active_fg');
-            const ts = this.buffers[i].file ?? 'Unknown';
-            this.renderer.text(x+5, y+2+i, ts, fgc);
+                this.renderer.rect(x+2,y+2+i, w-4, 1, this.theme.getElementRGB('selected_name'));
+            }
+
+            const ts = this.buffers[i].file ?? '????';
+            this.renderer.text(x+5, y+2+i, ts.slice(0, w-5), fgc);
             if(!this.buffers[i].hasSaved)
-                this.renderer.text(x+3, y+2+i, '\uf111', this.theme.getColor(['lyellow','lyellow']));
+                this.renderer.text(x+3, y+2+i, '\uf111', this.theme.getElementRGB('write_bubble'));
         }
     }
 
@@ -621,7 +689,7 @@ class Editor extends utils.TypedEventEmitter<{
             },
             {
                 st: `Ln ${c.y}, Col ${c.x}`,
-                fg: this.theme.getElementRGB('white'),
+                fg: this.theme.getElementRGB('foreground'),
                 bg: this.theme.getElementRGB('chevy_1')
             }
         ];
@@ -685,14 +753,19 @@ utils.setTitle('Atyp');
 editor.on('click', (mouse, x, y, released) => {
     const { columns: w, rows: h } = Deno.consoleSize();
 
-    if(mouse == 0 && released) {
-        if(x > w-editor.layout.explorerWidth && x <= w && y <= h-2) {
-            editor.write('explorer click');
+    if(released) {
+        if(x > w-editor.layout.explorerWidth && x < w && y <= h-2) {
+            // Unhardcode this
+            const relY = y;
+            if(relY > 2) {
+                if(mouse == 0)
+                    editor.setBuffer(relY-3)
+                else if(mouse == 2)
+                    editor.deleteBuffer(relY-3);
+            }
             editor.render();
         } else if(x > 6 && x < w-editor.layout.explorerWidth && y > 1 && y < h-2) {
-            // const woe = w-editor.layout.explorerWidth-2;
-            // const hoe = w-editor.layout.explorerWidth-3;
-            // editor.setCursorPos(Math.min(x-7, woe), (y-2));
+            // figure out how to do mouse movement in the editor
             editor.render();
         }
     }

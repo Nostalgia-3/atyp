@@ -102,7 +102,7 @@ export class Renderer {
 
     box(x: number, y: number, w: number, h: number, text: string, fg: utils.Gradient, bg?: utils.Gradient) {
         if(bg) this.rect(x, y, w, h, bg);
-        this.text(x, y, `╭─ ${text} `.padEnd(w-1, '─') + `╮`, fg);
+        this.text(x, y, (`╭─ ${text} `.padEnd(w-1, '─') + `╮`), fg);
         this.vline(x, y+1, h-2, utils.grad(fg[0]));
         this.vline(x+w-1, y+1, h-2, utils.grad(fg[1]));
         this.text(x, y+h-1, `╰${''.padEnd(w-2, '─')}╯`, fg);

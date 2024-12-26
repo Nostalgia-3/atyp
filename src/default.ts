@@ -11,11 +11,12 @@ export const DEFAULT_THEME: ThemeObject = {
         "foreground": "white",
         "background": "black",
 
-        "editor_bg": "blue",
+        "editor_fg": "blue",
+        "editor_bg": "black",
 
         "explorer_title": "white",
-        "explorer_active_fg": "green",
-        "explorer_fg": "commentgray",
+        "explorer_active_fg": "black",
+        "explorer_fg": "white",
         "explorer_bg": "magenta",
 
         "select_back": "white",
@@ -30,6 +31,8 @@ export const DEFAULT_THEME: ThemeObject = {
         "info_bar_bg": "lblack",
         "command_fg": "white",
         "command_bg": "guttergray",
+
+        "write_bubble": "lyellow",
 
         "unknown": "white",
         "keyword": "magenta",
@@ -65,3 +68,15 @@ export const DEFAULT_THEME: ThemeObject = {
         { "name": "cyan",       "rgb": [ 86, 182, 194 ] }
     ]
 };
+
+export function DEFAULT_LAYOUT(w: number, h: number) {
+    return {
+        elements: [
+            {
+                id: 'editor',
+                type: 'editor',
+                position: [0, 0]
+            }
+        ]
+    };
+}
